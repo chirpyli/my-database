@@ -157,7 +157,7 @@ postgres=# explain select * from t1 where id in (select cid from school where st
      ->  Seq Scan on school  (cost=0.00..1.05 rows=1 width=4)
            Filter: (students > t1.id)
 ```
-没有被优化为Semi Join。也就是说并不是所有的子连接都可以被上拉优化。具体的我们分析一下源码。
+没有被优化为Semi Join。也就是说并不是所有的子连接都可以被上拉优化。是否被上拉取决于上拉后是否保持等价变换（正确性），有很多情况是不能被上拉的，另一个是上拉优化后是否执行效率更高，并不是所有的情况上拉后执行效率更高，具体的我们分析一下源码。
 
 
 #### 源码分析
