@@ -4,6 +4,8 @@ database study, include PostgreSQL, distribute system  and so on.
 
 ## 目录
 
+### 解析器
+- [PostgreSQL中列名表名长度限制.md](./parser/PostgreSQL中表名列名长度限制.md)
 
 ### 查询优化器
 - [逻辑优化之子连接优化](./query-optimizer/sublink-optimizer.md)
@@ -17,7 +19,7 @@ database study, include PostgreSQL, distribute system  and so on.
 - [leveldb学习笔记](./leveldb/leveldb学习笔记1.md)
 
 ### TiDB
-
+- [单机部署Tikv](./tidb/单机部署Tikv.md)
 
 ### 行业相关
 - [数据库开源项目参考](./数据库开源项目参考.md)
