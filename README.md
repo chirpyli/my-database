@@ -9,9 +9,12 @@ database study, include PostgreSQL, distribute system  and so on.
 - [SQL查询](./sql/sql-select.md)
 
 ### PostgreSQL
+
+- [词法分析与flex](./postgres/词法分析与flex.md)
+- [PostgreSQL中scan.l源码分析](./postgres/PostgreSQL中scan.l源码分析.md)
 - [PostgreSQL中列名表名长度限制](./postgres/PostgreSQL中表名列名长度限制.md)
 - [PostgreSQL如何添加内核函数](./postgres/PostgreSQL如何添加内核函数.md)
-- [查询优化之子连接优化](./postgres/sublink-optimizer.md)
+- [查询优化之子连接优化](./postgres/查询优化之子连接优化.md)
 
 
 
