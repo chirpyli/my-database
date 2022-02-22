@@ -1,4 +1,4 @@
- ### update源码分析
+ ### UPDATE源码分析
 本文主要描述SQL中UPDATE语句的源码分析，代码为PG13.3版本。
 
 ### 整体流程分析
@@ -17,7 +17,7 @@ SQL流程如下：
 exec_simple_query(const char *query_string)
 // ------- 解析器部分--------------
 --> pg_parse_query(query_string);    //生成语法解析树
--->pg_analyze_and_rewrite(parsetree, query_string,NULL, 0, NULL);   // 生成查询树Query
+--> pg_analyze_and_rewrite(parsetree, query_string,NULL, 0, NULL);   // 生成查询树Query
     --> parse_analyze(parsetree, query_string, paramTypes, numParams,queryEnv); // 语义分析
     --> pg_rewrite_query(query);    // 规则重写
 
@@ -25,8 +25,6 @@ exec_simple_query(const char *query_string)
 --> pg_plan_queries()
 
 //-------- 执行器----------
---> CreatePortal("", true, true);
---> PortalDefineQuery(portal,NULL,query_string,commandTag,plantree_list,NULL);
 --> PortalStart(portal, NULL, 0, InvalidSnapshot);
 --> PortalRun(portal,FETCH_ALL,true,true,receiver,receiver,&qc);    // 执行器执行
 --> PortalDrop(portal, false);
@@ -77,17 +75,12 @@ typedef struct ResTarget
 gram.y中Update语法的定义：
 ```c++
 /*****************************************************************************
- *
  *		QUERY:
  *				UpdateStmt (UPDATE)
- *
  *****************************************************************************/
 //结合这条语句分析 update dtea set id = 0;
 UpdateStmt: opt_with_clause UPDATE relation_expr_opt_alias
-			SET set_clause_list
-			from_clause
-			where_or_current_clause
-			returning_clause
+			SET set_clause_list from_clause where_or_current_clause returning_clause
 				{
 					UpdateStmt *n = makeNode(UpdateStmt);
 					n->relation = $3;
@@ -117,8 +110,7 @@ set_clause:	  // id     =   0
 					int i = 1;
 					ListCell *col_cell;
 
-					/* Create a MultiAssignRef source for each target */
-					foreach(col_cell, $2)
+					foreach(col_cell, $2)	/* Create a MultiAssignRef source for each target */
 					{
 						ResTarget *res_col = (ResTarget *) lfirst(col_cell);
 						MultiAssignRef *r = makeNode(MultiAssignRef);
@@ -183,7 +175,7 @@ static Query *transformUpdateStmt(ParseState *pstate, UpdateStmt *stmt) {
 		qry->hasModifyingCTE = pstate->p_hasModifyingCTE;
 	}
 
-	qry->resultRelation = setTargetTable(pstate, stmt->relation,stmt->relation->inh,true,ACL_UPDATE);
+	qry->resultRelation = setTargetTable(pstate, stmt->relation, stmt->relation->inh, true, ACL_UPDATE);
 	nsitem = pstate->p_target_nsitem;
 
 	/* subqueries in FROM cannot access the result relation */
@@ -222,57 +214,32 @@ typedef struct TargetEntry
 	Expr	   *expr;			/* expression to evaluate */
 	AttrNumber	resno;			/* attribute number (see notes above) */
 	char	   *resname;		/* name of the column (could be NULL) */
-	Index		ressortgroupref;	/* nonzero if referenced by a sort/group
-									 * clause */
+	Index		ressortgroupref;	/* nonzero if referenced by a sort/group clause */
 	Oid			resorigtbl;		/* OID of column's source table */
 	AttrNumber	resorigcol;		/* column's number in source table */
-	bool		resjunk;		/* set to true to eliminate the attribute from
-								 * final target list */
+	bool		resjunk;		/* set to true to eliminate the attribute from final target list */
 } TargetEntry;
 ```
-对于其内部处理可参考源码`src/backend/parser`中的相关处理，这里不再细述。需要重点阅读一下README，PG源码中所有的README都是非常好的资料，一定要认真读。
-```c++
-src/backend/parser/README
 
-Parser
-======
-
-This directory does more than tokenize and parse SQL queries.  It also
-creates Query structures for the various complex queries that are passed
-to the optimizer and then executor.
-
-parser.c	    things start here
-scan.l		    break query into tokens     
-scansup.c	    handle escapes in input strings
-gram.y		    parse the tokens and produce a "raw" parse tree     
-analyze.c	    top level of parse analysis for optimizable queries
-parse_agg.c	    handle aggregates, like SUM(col1),  AVG(col2), ...
-parse_clause.c	handle clauses like WHERE, ORDER BY, GROUP BY, ...
-parse_coerce.c	handle coercing expressions to different data types
-parse_collate.c	assign collation information in completed expressions
-parse_cte.c	    handle Common Table Expressions (WITH clauses)
-parse_expr.c	handle expressions like col, col + 3, x = 3 or x = 4
-parse_func.c	handle functions, table.column and column identifiers
-parse_node.c	create nodes for various structures
-parse_oper.c	handle operators in expressions
-parse_param.c	handle Params (for the cases used in the core backend)
-parse_relation.c support routines for tables and column handling
-parse_target.c	handle the result list of the query
-parse_type.c	support routines for data type handling
-parse_utilcmd.c	parse analysis for utility commands (done at execution time)
-
-See also src/common/keywords.c, which contains the table of standard
-keywords and the keyword lookup function.  We separated that out because
-various frontend code wants to use it too.
-```
+> 对于其内部处理可参考源码`src/backend/parser`中的相关处理，这里不再细述。需要重点阅读一下[README](https://github.com/postgres/postgres/blob/master/src/backend/parser/README)，PG源码中所有的README都是非常好的资料，一定要认真读。
 
 #### 优化器——生成执行计划
 这块的内容很多，主要的逻辑是先进行逻辑优化，比如子查询、子链接、常量表达式、选择下推等等的处理，因为我们要分析的这条语句十分简单，所以逻辑优化的这部分都没有涉及到。物理优化，涉及到选择率，代价估计，索引扫描还是顺序扫描，选择那种连接方式，应用动态规划呢还是基因算法，选择nestloop-join、merge-join还是hash-join等。因为我们这个表没有建索引，更新单表也不涉及到多表连接，所以物理优化这块涉及的也不多。路径生成，生成最佳路径，再由最佳路径生成执行计划。
 
-在路径生成这块，最基础的是对表的扫描方式，比如顺序扫描、索引扫描，再往上是连接方式，采用那种连接方式，再往上是比如排序、Limit等路径......，由底向上生成路径。
+在路径生成这块，最基础的是对表的扫描方式，比如顺序扫描、索引扫描，再往上是连接方式，采用那种连接方式，再往上是比如排序、Limit等路径......，由底向上生成路径。我们要分析的语句很简单，没有其他处理，就顺序扫描再更新就可以了。
 
-这里先不考虑并行执行计划。
+这里先不考虑并行执行计划。我们先看一下其执行计划结果：
+```sql
+postgres@postgres=# explain update dtea set id = 0;
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Update on dtea  (cost=0.00..19.00 rows=900 width=68)
+   ->  Seq Scan on dtea  (cost=0.00..19.00 rows=900 width=68)
+(2 rows)
+```
+下面我们分析一下其执行计划的生成流程：
 ```c++
+// 由查询树Query--> Path --> Plan (PlannedStmt)
 pg_plan_queries()
 --> pg_plan_query()
     --> planner()
@@ -291,14 +258,20 @@ pg_plan_queries()
                     --> query_planner(root, standard_qp_callback, &qp_extra);   // 重要
                         --> add_base_rels_to_query()
                         --> deconstruct_jointree(root);
-                        --> add_other_rels_to_query(root);  
+                        --> add_other_rels_to_query(root); // 展开分区表到PlannerInfo中的相关字段中 
                             --> expand_inherited_rtentry()  
+								--> expand_planner_arrays(root, num_live_parts);
                         --> make_one_rel(root, joinlist);   // 动态规划，基因算法在这个里面
                             --> set_base_rel_sizes(root); 
                                 --> set_rel_size();
-                                    --> set_plain_rel_size()
+									--> set_append_rel_size(root, rel, rti, rte);	// 如果是分区表或者继承走这里，否则走下面
+										--> set_rel_size(root, childrel, childRTindex, childRTE);	// 处理子分区表
+											--> set_plain_rel_size(root, rel, rte);
+                                    --> set_plain_rel_size()  	// 如果不是分区表或者继承
                                         --> set_baserel_size_estimates()
                             --> set_base_rel_pathlists(root);
+								--> set_rel_pathlist(root, rel, rti, root->simple_rte_array[rti]);
+									--> set_append_rel_pathlist(root, rel, rti, rte);	// 生成各分区表的访问路径
                             --> make_rel_from_joinlist(root, joinlist);
                     --> apply_scanjoin_target_to_paths()
                     --> create_modifytable_path()
@@ -311,16 +284,13 @@ pg_plan_queries()
             // 后续处理，由Plan ---> PlannedStmt
 ```
 
-核心数据结构： PlannedStmt、PlannerInfo、RelOptInfo、Path
-
-RelOptInfo: 存储访问路径及其代价
+核心数据结构： PlannedStmt、PlannerInfo、RelOptInfo（存储访问路径及其代价）、Path
 
 `Path`：所有的路径都继承自`Path`，所以这个比较重要。
 ```c++
 typedef struct Path
 {
 	NodeTag		type;
-
 	NodeTag		pathtype;		/* tag identifying scan/join method */
 
 	RelOptInfo *parent;			/* the relation this path can build */
@@ -365,17 +335,14 @@ typedef struct ModifyTablePath
 ```
 生成update执行路径，最终都是要生成ModifyTablePath，本例中路径生成过程： Path-->ProjectionPath-->ModifyTablePath，也就是先顺序扫描表，再修改表。后面由路径生成执行计划。
 ```c++
-/*
- * create_modifytable_path
+/* create_modifytable_path
  *	  Creates a pathnode that represents performing INSERT/UPDATE/DELETE mods
  *
  * 'rel' is the parent relation associated with the result
  * 'resultRelations' is an integer list of actual RT indexes of target rel(s)
  * 'subpaths' is a list of Path(s) producing source data (one per rel)
- * 'subroots' is a list of PlannerInfo structs (one per rel)
- */
-ModifyTablePath *
-create_modifytable_path(PlannerInfo *root, RelOptInfo *rel,
+ * 'subroots' is a list of PlannerInfo structs (one per rel)*/
+ModifyTablePath *create_modifytable_path(PlannerInfo *root, RelOptInfo *rel,
 						CmdType operation, bool canSetTag,
 						Index nominalRelation, Index rootRelation,
 						bool partColsUpdated,
@@ -391,15 +358,13 @@ create_modifytable_path(PlannerInfo *root, RelOptInfo *rel,
 
 	Assert(list_length(resultRelations) == list_length(subpaths));
 	Assert(list_length(resultRelations) == list_length(subroots));
-	Assert(withCheckOptionLists == NIL ||
-		   list_length(resultRelations) == list_length(withCheckOptionLists));
-	Assert(returningLists == NIL ||
-		   list_length(resultRelations) == list_length(returningLists));
+	Assert(withCheckOptionLists == NIL || list_length(resultRelations) == list_length(withCheckOptionLists));
+	Assert(returningLists == NIL || list_length(resultRelations) == list_length(returningLists));
 
 	pathnode->path.pathtype = T_ModifyTable;
 	pathnode->path.parent = rel;
-	/* pathtarget is not interesting, just make it minimally valid */
-	pathnode->path.pathtarget = rel->reltarget;
+
+	pathnode->path.pathtarget = rel->reltarget;	/* pathtarget is not interesting, just make it minimally valid */
 	/* For now, assume we are above any joins, so no parameterization */
 	pathnode->path.param_info = NULL;
 	pathnode->path.parallel_aware = false;
@@ -407,16 +372,14 @@ create_modifytable_path(PlannerInfo *root, RelOptInfo *rel,
 	pathnode->path.parallel_workers = 0;
 	pathnode->path.pathkeys = NIL;
 
-	/*
-	 * Compute cost & rowcount as sum of subpath costs & rowcounts.
+	/** Compute cost & rowcount as sum of subpath costs & rowcounts.
 	 *
 	 * Currently, we don't charge anything extra for the actual table
 	 * modification work, nor for the WITH CHECK OPTIONS or RETURNING
 	 * expressions if any.  It would only be window dressing, since
 	 * ModifyTable is always a top-level node and there is no way for the
 	 * costs to change any higher-level planning choices.  But we might want
-	 * to make it look better sometime.
-	 */
+	 * to make it look better sometime.*/
 	pathnode->path.startup_cost = 0;
 	pathnode->path.total_cost = 0;
 	pathnode->path.rows = 0;
@@ -432,12 +395,10 @@ create_modifytable_path(PlannerInfo *root, RelOptInfo *rel,
 		total_size += subpath->pathtarget->width * subpath->rows;
 	}
 
-	/*
-	 * Set width to the average width of the subpath outputs.  XXX this is
+	/* Set width to the average width of the subpath outputs.  XXX this is
 	 * totally wrong: we should report zero if no RETURNING, else an average
 	 * of the RETURNING tlist widths.  But it's what happened historically,
-	 * and improving it is a task for another day.
-	 */
+	 * and improving it is a task for another day.*/
 	if (pathnode->path.rows > 0)
 		total_size /= pathnode->path.rows;
 	pathnode->path.pathtarget->width = rint(total_size);
@@ -464,9 +425,7 @@ create_modifytable_path(PlannerInfo *root, RelOptInfo *rel,
 Plan *create_plan(PlannerInfo *root, Path *best_path)
 {
 	Plan	   *plan;
-
-	/* plan_params should not be in use in current query level */
-	Assert(root->plan_params == NIL);
+	Assert(root->plan_params == NIL);	/* plan_params should not be in use in current query level */
 
 	/* Initialize this module's workspace in PlannerInfo */
 	root->curOuterRels = NULL;
@@ -475,31 +434,26 @@ Plan *create_plan(PlannerInfo *root, Path *best_path)
 	/* Recursively process the path tree, demanding the correct tlist result */
 	plan = create_plan_recurse(root, best_path, CP_EXACT_TLIST);	// 实际实现是在这里
 
-	/*
-	 * Make sure the topmost plan node's targetlist exposes the original
+	/** Make sure the topmost plan node's targetlist exposes the original
 	 * column names and other decorative info.  Targetlists generated within
 	 * the planner don't bother with that stuff, but we must have it on the
 	 * top-level tlist seen at execution time.  However, ModifyTable plan
-	 * nodes don't have a tlist matching the querytree targetlist.
-	 */
+	 * nodes don't have a tlist matching the querytree targetlist.*/
 	if (!IsA(plan, ModifyTable))
 		apply_tlist_labeling(plan->targetlist, root->processed_tlist);
 
-	/*
-	 * Attach any initPlans created in this query level to the topmost plan
+	/** Attach any initPlans created in this query level to the topmost plan
 	 * node.  (In principle the initplans could go in any plan node at or
 	 * above where they're referenced, but there seems no reason to put them
 	 * any lower than the topmost node for the query level.  Also, see
-	 * comments for SS_finalize_plan before you try to change this.)
-	 */
+	 * comments for SS_finalize_plan before you try to change this.)*/
 	SS_attach_initplans(root, plan);
 
 	/* Check we successfully assigned all NestLoopParams to plan nodes */
 	if (root->curOuterParams != NIL)
 		elog(ERROR, "failed to assign all NestLoopParams to plan nodes");
 
-	/** Reset plan_params to ensure param IDs used for nestloop params are not
-	 * re-used later*/
+	/** Reset plan_params to ensure param IDs used for nestloop params are not re-used later*/
 	root->plan_params = NIL;
 
 	return plan;
@@ -514,15 +468,13 @@ static ModifyTable *create_modifytable_plan(PlannerInfo *root, ModifyTablePath *
 			   *subroots;
 
 	/* Build the plan for each input path */
-	forboth(subpaths, best_path->subpaths,
-			subroots, best_path->subroots)
+	forboth(subpaths, best_path->subpaths, subroots, best_path->subroots)
 	{
 		Path	   *subpath = (Path *) lfirst(subpaths);
 		PlannerInfo *subroot = (PlannerInfo *) lfirst(subroots);
 		Plan	   *subplan;
 
-		/*
-		 * In an inherited UPDATE/DELETE, reference the per-child modified
+		/* In an inherited UPDATE/DELETE, reference the per-child modified
 		 * subroot while creating Plans from Paths for the child rel.  This is
 		 * a kluge, but otherwise it's too hard to ensure that Plan creation
 		 * functions (particularly in FDWs) don't depend on the contents of
@@ -530,8 +482,7 @@ static ModifyTable *create_modifytable_plan(PlannerInfo *root, ModifyTablePath *
 		 * downside is that creation functions for Plans that might appear
 		 * below a ModifyTable cannot expect to modify the contents of "root"
 		 * and have it "stick" for subsequent processing such as setrefs.c.
-		 * That's not great, but it seems better than the alternative.
-		 */
+		 * That's not great, but it seems better than the alternative.*/
 		subplan = create_plan_recurse(subroot, subpath, CP_EXACT_TLIST);
 
 		/* Transfer resname/resjunk labeling, too, to keep executor happy */
@@ -575,8 +526,7 @@ static ModifyTable *create_modifytable_plan(PlannerInfo *root, ModifyTablePath *
  *
  * Note that rowMarks and epqParam are presumed to be valid for all the
  * subplan(s); they can't contain any info that varies across subplans.
- * ----------------
- */
+ * ----------------*/
 typedef struct ModifyTable
 {
 	Plan		plan;
@@ -639,10 +589,7 @@ PortalDrop(portal, false);
 
 关键数据结构：
 ```c++
-/* ----------------
- *	 ModifyTableState information
- * ----------------
- */
+// ModifyTableState information
 typedef struct ModifyTableState
 {
 	PlanState	ps;				/* its first field is NodeTag */
@@ -661,17 +608,13 @@ typedef struct ModifyTableState
 	EPQState	mt_epqstate;	/* for evaluating EvalPlanQual rechecks */
 	bool		fireBSTriggers; /* do we need to fire stmt triggers? */
 
-	/*
-	 * Slot for storing tuples in the root partitioned table's rowtype during
-	 * an UPDATE of a partitioned table.
-	 */
+	/* Slot for storing tuples in the root partitioned table's rowtype during
+	 * an UPDATE of a partitioned table. */
 	TupleTableSlot *mt_root_tuple_slot;
 
-	/* Tuple-routing support info */
-	struct PartitionTupleRouting *mt_partition_tuple_routing;
+	struct PartitionTupleRouting *mt_partition_tuple_routing;	/* Tuple-routing support info */
 
-	/* controls transition table population for specified operation */
-	struct TransitionCaptureState *mt_transition_capture;
+	struct TransitionCaptureState *mt_transition_capture;	/* controls transition table population for specified operation */
 
 	/* controls transition table population for INSERT...ON CONFLICT UPDATE */
 	struct TransitionCaptureState *mt_oc_transition_capture;
@@ -688,8 +631,7 @@ typedef struct ModifyTableState
  *
  *		Perform table modifications as required, and return RETURNING results
  *		if needed.
- * ----------------------------------------------------------------
- */
+ * ---------------------------------------------------------------- */
 static TupleTableSlot *ExecModifyTable(PlanState *pstate)
 {
 	ModifyTableState *node = castNode(ModifyTableState, pstate);
@@ -709,30 +651,20 @@ static TupleTableSlot *ExecModifyTable(PlanState *pstate)
 
 	CHECK_FOR_INTERRUPTS();
 
-	/*
-	 * This should NOT get called during EvalPlanQual; we should have passed a
+	/* This should NOT get called during EvalPlanQual; we should have passed a
 	 * subplan tree to EvalPlanQual, instead.  Use a runtime test not just
-	 * Assert because this condition is easy to miss in testing.  (Note:
-	 * although ModifyTable should not get executed within an EvalPlanQual
-	 * operation, we do have to allow it to be initialized and shut down in
-	 * case it is within a CTE subplan.  Hence this test must be here, not in
-	 * ExecInitModifyTable.)
-	 */
+	 * Assert because this condition is easy to miss in testing. */
 	if (estate->es_epq_active != NULL)
 		elog(ERROR, "ModifyTable should not be called during EvalPlanQual");
 
-	/*
-	 * If we've already completed processing, don't try to do more.  We need
+	/* If we've already completed processing, don't try to do more.  We need
 	 * this test because ExecPostprocessPlan might call us an extra time, and
 	 * our subplan's nodes aren't necessarily robust against being called
-	 * extra times.
-	 */
+	 * extra times.*/
 	if (node->mt_done)
 		return NULL;
 
-	/*
-	 * On first call, fire BEFORE STATEMENT triggers before proceeding.
-	 */
+	/* On first call, fire BEFORE STATEMENT triggers before proceeding.*/
 	if (node->fireBSTriggers)
 	{
 		fireBSTriggers(node);
@@ -744,61 +676,44 @@ static TupleTableSlot *ExecModifyTable(PlanState *pstate)
 	subplanstate = node->mt_plans[node->mt_whichplan];
 	junkfilter = resultRelInfo->ri_junkFilter;
 
-	/*
-	 * es_result_relation_info must point to the currently active result
-	 * relation while we are within this ModifyTable node.  Even though
-	 * ModifyTable nodes can't be nested statically, they can be nested
+	/* es_result_relation_info must point to the currently active result relation while we are within this ModifyTable node.  
+	 * Even though ModifyTable nodes can't be nested statically, they can be nested
 	 * dynamically (since our subplan could include a reference to a modifying
-	 * CTE).  So we have to save and restore the caller's value.
-	 */
+	 * CTE).  So we have to save and restore the caller's value.*/
 	saved_resultRelInfo = estate->es_result_relation_info;
-
 	estate->es_result_relation_info = resultRelInfo;
 
-	/* Fetch rows from subplan(s), and execute the required table modification
-	 * for each row.*/
+	/* Fetch rows from subplan(s), and execute the required table modification for each row.*/
 	for (;;)
 	{
-		/*
-		 * Reset the per-output-tuple exprcontext.  This is needed because
+		/* Reset the per-output-tuple exprcontext.  This is needed because
 		 * triggers expect to use that context as workspace.  It's a bit ugly
-		 * to do this below the top level of the plan, however.  We might need
-		 * to rethink this later.
-		 */
+		 * to do this below the top level of the plan, however.  We might need to rethink this later.*/
 		ResetPerTupleExprContext(estate);
 
-		/*
-		 * Reset per-tuple memory context used for processing on conflict and
-		 * returning clauses, to free any expression evaluation storage
-		 * allocated in the previous cycle.
-		 */
+		/* Reset per-tuple memory context used for processing on conflict and
+		 * returning clauses, to free any expression evaluation storage allocated in the previous cycle. */
 		if (pstate->ps_ExprContext)
 			ResetExprContext(pstate->ps_ExprContext);
 
 		planSlot = ExecProcNode(subplanstate);
-
 		if (TupIsNull(planSlot))
 		{
 			/* advance to next subplan if any */
-			node->mt_whichplan++;
+			node->mt_whichplan++;	// 分区表的update，每个分区分布对应一个subplan，当执行完一个分区再执行下一个分区
 			if (node->mt_whichplan < node->mt_nplans)
 			{
 				resultRelInfo++;
 				subplanstate = node->mt_plans[node->mt_whichplan];
 				junkfilter = resultRelInfo->ri_junkFilter;
 				estate->es_result_relation_info = resultRelInfo;
-				EvalPlanQualSetPlan(&node->mt_epqstate, subplanstate->plan,
-									node->mt_arowmarks[node->mt_whichplan]);
+				EvalPlanQualSetPlan(&node->mt_epqstate, subplanstate->plan, node->mt_arowmarks[node->mt_whichplan]);
 				/* Prepare to convert transition tuples from this child. */
-				if (node->mt_transition_capture != NULL)
-				{
-					node->mt_transition_capture->tcs_map =
-						tupconv_map_for_subplan(node, node->mt_whichplan);
+				if (node->mt_transition_capture != NULL) {
+					node->mt_transition_capture->tcs_map = tupconv_map_for_subplan(node, node->mt_whichplan);
 				}
-				if (node->mt_oc_transition_capture != NULL)
-				{
-					node->mt_oc_transition_capture->tcs_map =
-						tupconv_map_for_subplan(node, node->mt_whichplan);
+				if (node->mt_oc_transition_capture != NULL) {
+					node->mt_oc_transition_capture->tcs_map = tupconv_map_for_subplan(node, node->mt_whichplan);
 				}
 				continue;
 			}
@@ -806,32 +721,17 @@ static TupleTableSlot *ExecModifyTable(PlanState *pstate)
 				break;
 		}
 
-		/*
-		 * Ensure input tuple is the right format for the target relation.
-		 */
-		if (node->mt_scans[node->mt_whichplan]->tts_ops != planSlot->tts_ops)
-		{
+		/* Ensure input tuple is the right format for the target relation.*/
+		if (node->mt_scans[node->mt_whichplan]->tts_ops != planSlot->tts_ops) {
 			ExecCopySlot(node->mt_scans[node->mt_whichplan], planSlot);
 			planSlot = node->mt_scans[node->mt_whichplan];
 		}
 
-		/*
-		 * If resultRelInfo->ri_usesFdwDirectModify is true, all we need to do
-		 * here is compute the RETURNING expressions.
-		 */
+		/* If resultRelInfo->ri_usesFdwDirectModify is true, all we need to do here is compute the RETURNING expressions.*/
 		if (resultRelInfo->ri_usesFdwDirectModify)
 		{
 			Assert(resultRelInfo->ri_projectReturning);
-
-			/*
-			 * A scan slot containing the data that was actually inserted,
-			 * updated or deleted has already been made available to
-			 * ExecProcessReturning by IterateDirectModify, so no need to
-			 * provide it here.
-			 */
-			slot = ExecProcessReturning(resultRelInfo->ri_projectReturning,
-										RelationGetRelid(resultRelInfo->ri_RelationDesc),
-										NULL, planSlot);
+			slot = ExecProcessReturning(resultRelInfo->ri_projectReturning, RelationGetRelid(resultRelInfo->ri_RelationDesc), NULL, planSlot);
 
 			estate->es_result_relation_info = saved_resultRelInfo;
 			return slot;
@@ -844,9 +744,7 @@ static TupleTableSlot *ExecModifyTable(PlanState *pstate)
 		oldtuple = NULL;
 		if (junkfilter != NULL)
 		{
-			/*
-			 * extract the 'ctid' or 'wholerow' junk attribute.
-			 */
+			/* extract the 'ctid' or 'wholerow' junk attribute.*/
 			if (operation == CMD_UPDATE || operation == CMD_DELETE)
 			{
 				char		relkind;
@@ -865,21 +763,7 @@ static TupleTableSlot *ExecModifyTable(PlanState *pstate)
 					tuple_ctid = *tupleid;	/* be sure we don't free ctid!! */
 					tupleid = &tuple_ctid;
 				}
-
-				/*
-				 * Use the wholerow attribute, when available, to reconstruct
-				 * the old relation tuple.
-				 *
-				 * Foreign table updates have a wholerow attribute when the
-				 * relation has a row-level trigger.  Note that the wholerow
-				 * attribute does not carry system columns.  Foreign table
-				 * triggers miss seeing those, except that we know enough here
-				 * to set t_tableOid.  Quite separately from this, the FDW may
-				 * fetch its own junk attrs to identify the row.
-				 *
-				 * Other relevant relkinds, currently limited to views, always
-				 * have a wholerow attribute.
-				 */
+				/* Use the wholerow attribute, when available, to reconstruct the old relation tuple.*/
 				else if (AttributeNumberIsValid(junkfilter->jf_junkAttNo))
 				{
 					datum = ExecGetJunkAttribute(slot,junkfilter->jf_junkAttNo,&isNull);
@@ -888,14 +772,10 @@ static TupleTableSlot *ExecModifyTable(PlanState *pstate)
 						elog(ERROR, "wholerow is NULL");
 
 					oldtupdata.t_data = DatumGetHeapTupleHeader(datum);
-					oldtupdata.t_len =
-						HeapTupleHeaderGetDatumLength(oldtupdata.t_data);
+					oldtupdata.t_len = HeapTupleHeaderGetDatumLength(oldtupdata.t_data);
 					ItemPointerSetInvalid(&(oldtupdata.t_self));
 					/* Historically, view triggers see invalid t_tableOid. */
-					oldtupdata.t_tableOid =
-						(relkind == RELKIND_VIEW) ? InvalidOid :
-						RelationGetRelid(resultRelInfo->ri_RelationDesc);
-
+					oldtupdata.t_tableOid = (relkind == RELKIND_VIEW) ? InvalidOid : RelationGetRelid(resultRelInfo->ri_RelationDesc);
 					oldtuple = &oldtupdata;
 				}
 				else
@@ -910,15 +790,10 @@ static TupleTableSlot *ExecModifyTable(PlanState *pstate)
 		switch (operation)
 		{
 			case CMD_INSERT:
-				/* Prepare for tuple routing if needed. */
-				if (proute)
-					slot = ExecPrepareTupleRouting(node, estate, proute,
-												   resultRelInfo, slot);
-				slot = ExecInsert(node, slot, planSlot,
-								  NULL, estate->es_result_relation_info,
-								  estate, node->canSetTag);
-				/* Revert ExecPrepareTupleRouting's state change. */
-				if (proute)
+				if (proute)				/* Prepare for tuple routing if needed. */
+					slot = ExecPrepareTupleRouting(node, estate, proute, resultRelInfo, slot);
+				slot = ExecInsert(node, slot, planSlot, NULL, estate->es_result_relation_info, estate, node->canSetTag);
+				if (proute)				/* Revert ExecPrepareTupleRouting's state change. */
 					estate->es_result_relation_info = resultRelInfo;
 				break;
 			case CMD_UPDATE:
@@ -928,28 +803,22 @@ static TupleTableSlot *ExecModifyTable(PlanState *pstate)
 			case CMD_DELETE:
 				slot = ExecDelete(node, tupleid, oldtuple, planSlot,
 								  &node->mt_epqstate, estate,
-								  true, node->canSetTag,
-								  false /* changingPart */ , NULL, NULL);
+								  true, node->canSetTag, false /* changingPart */ , NULL, NULL);
 				break;
 			default:
 				elog(ERROR, "unknown operation");
 				break;
 		}
 
-		/* If we got a RETURNING result, return it to caller.  We'll continue
-		 * the work on next call.*/
-		if (slot)
-		{
+		/* If we got a RETURNING result, return it to caller.  We'll continue the work on next call.*/
+		if (slot) {
 			estate->es_result_relation_info = saved_resultRelInfo;
 			return slot;
 		}
 	}
 
-	/* Restore es_result_relation_info before exiting */
-	estate->es_result_relation_info = saved_resultRelInfo;
-
-	/* We're done, but fire AFTER STATEMENT triggers before exiting.*/
-	fireASTriggers(node);
+	estate->es_result_relation_info = saved_resultRelInfo;	/* Restore es_result_relation_info before exiting */
+	fireASTriggers(node);	/* We're done, but fire AFTER STATEMENT triggers before exiting.*/
 
 	node->mt_done = true;
 
@@ -958,7 +827,7 @@ static TupleTableSlot *ExecModifyTable(PlanState *pstate)
 ```
 
 #### 事务
-这一块主要是要理解PG中update语句并不是原地更新元组，而是插入一条新元组。因为PG实现MVCC与Mysql，Oracle的实现方式有所不同，并不是通过undo日志实现的，相当于把undo日志记录到了原有的表中，并不是单独存放在一个地方。具体的不再细述，内容太多了。
+这一块主要是要理解PG中update语句并不是原地更新元组，而是插入一条新元组。因为PG实现MVCC与Mysql，Oracle的实现方式有所不同，并不是通过undo日志实现的，相当于把undo日志记录到了原有的表中，并不是单独存放在一个地方。具体的不再细述，内容太多了，以后再分析事务部分。
 
 
 
