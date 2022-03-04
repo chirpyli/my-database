@@ -1,4 +1,4 @@
- ### UPDATE源码分析
+### PG中UPDATE源码分析
 本文主要描述SQL中UPDATE语句的源码分析，代码为PG13.3版本。
 
 ### 整体流程分析
@@ -261,7 +261,7 @@ pg_plan_queries()
                         --> add_other_rels_to_query(root); // 展开分区表到PlannerInfo中的相关字段中 
                             --> expand_inherited_rtentry()  
 								--> expand_planner_arrays(root, num_live_parts);
-                        --> make_one_rel(root, joinlist);   // 动态规划，基因算法在这个里面
+                        --> make_one_rel(root, joinlist);   
                             --> set_base_rel_sizes(root); 
                                 --> set_rel_size();
 									--> set_append_rel_size(root, rel, rti, rte);	// 如果是分区表或者继承走这里，否则走下面
@@ -272,7 +272,9 @@ pg_plan_queries()
                             --> set_base_rel_pathlists(root);
 								--> set_rel_pathlist(root, rel, rti, root->simple_rte_array[rti]);
 									--> set_append_rel_pathlist(root, rel, rti, rte);	// 生成各分区表的访问路径
-                            --> make_rel_from_joinlist(root, joinlist);
+                            --> make_rel_from_joinlist(root, joinlist);// 动态规划还是基因规划
+								--> standard_join_search()	// 动态规划
+								--> geqo()	// 基因规划与动态规划二选一
                     --> apply_scanjoin_target_to_paths()
                     --> create_modifytable_path()
             // 由PlannerInfo---> RelOptInfo 
@@ -491,20 +493,12 @@ static ModifyTable *create_modifytable_plan(PlannerInfo *root, ModifyTablePath *
 		subplans = lappend(subplans, subplan);
 	}
 
-	plan = make_modifytable(root,
-							best_path->operation,
-							best_path->canSetTag,
-							best_path->nominalRelation,
-							best_path->rootRelation,
-							best_path->partColsUpdated,
-							best_path->resultRelations,
-							subplans,
-							best_path->subroots,
-							best_path->withCheckOptionLists,
-							best_path->returningLists,
-							best_path->rowMarks,
-							best_path->onconflict,
-							best_path->epqParam);
+	plan = make_modifytable(root,best_path->operation,best_path->canSetTag,
+						best_path->nominalRelation,best_path->rootRelation,
+						best_path->partColsUpdated,best_path->resultRelations,
+						subplans,best_path->subroots,best_path->withCheckOptionLists,
+						best_path->returningLists,best_path->rowMarks,
+						best_path->onconflict,best_path->epqParam);
 
 	copy_generic_path_info(&plan->plan, &best_path->path);
 
@@ -565,9 +559,11 @@ PortalRun(portal,FETCH_ALL,true,true,receiver,receiver,&qc);
 	--> ProcessQuery()
 		--> ExecutorStart(queryDesc, 0);
 			--> standard_ExecutorStart()
+				--> estate = CreateExecutorState();	// 创建EState
+				--> estate->es_output_cid = GetCurrentCommandId(true);	// 获得cid，后面更新的时候要用
 				--> InitPlan(queryDesc, eflags);
 					--> ExecInitNode(plan, estate, eflags);		
-						--> ExecInitModifyTable()
+						--> ExecInitModifyTable()	// 初始化ModifyTableState
 		--> ExecutorRun(queryDesc, ForwardScanDirection, 0L, true);
 			--> standard_ExecutorRun()
 				--> ExecutePlan()
@@ -826,11 +822,405 @@ static TupleTableSlot *ExecModifyTable(PlanState *pstate)
 }
 ```
 
+我们看一下具体执行Update的实现
+```c++
+```c++
+/* ----------------------------------------------------------------
+ *		ExecUpdate
+ *
+ *		note: we can't run UPDATE queries with transactions off because UPDATEs are actually INSERTs and our
+ *		scan will mistakenly loop forever, updating the tuple it just inserted..  This should be fixed but until it
+ *		is, we don't want to get stuck in an infinite loop which corrupts your database..
+ *
+ *		When updating a table, tupleid identifies the tuple to update and oldtuple is NULL.  
+ *
+ *		Returns RETURNING result if any, otherwise NULL.
+ * ----------------------------------------------------------------*/
+static TupleTableSlot *
+ExecUpdate(ModifyTableState *mtstate,
+		   ItemPointer tupleid,
+		   HeapTuple oldtuple,
+		   TupleTableSlot *slot,
+		   TupleTableSlot *planSlot,
+		   EPQState *epqstate,
+		   EState *estate,
+		   bool canSetTag)
+{
+	ResultRelInfo *resultRelInfo;
+	Relation	resultRelationDesc;
+	TM_Result	result;
+	TM_FailureData tmfd;
+	List	   *recheckIndexes = NIL;
+	TupleConversionMap *saved_tcs_map = NULL;
+
+	/* abort the operation if not running transactions*/
+	if (IsBootstrapProcessingMode())
+		elog(ERROR, "cannot UPDATE during bootstrap");
+
+	ExecMaterializeSlot(slot);
+
+	/* get information on the (current) result relation*/
+	resultRelInfo = estate->es_result_relation_info;
+	resultRelationDesc = resultRelInfo->ri_RelationDesc;
+
+	/* BEFORE ROW UPDATE Triggers */
+	if (resultRelInfo->ri_TrigDesc && resultRelInfo->ri_TrigDesc->trig_update_before_row)
+	{
+		if (!ExecBRUpdateTriggers(estate, epqstate, resultRelInfo, tupleid, oldtuple, slot))
+			return NULL;		/* "do nothing" */
+	}
+
+	/* INSTEAD OF ROW UPDATE Triggers */
+	if (resultRelInfo->ri_TrigDesc && resultRelInfo->ri_TrigDesc->trig_update_instead_row)
+	{
+		if (!ExecIRUpdateTriggers(estate, resultRelInfo, oldtuple, slot))
+			return NULL;		/* "do nothing" */
+	}
+	else if (resultRelInfo->ri_FdwRoutine)
+	{
+		/* Compute stored generated columns*/
+		if (resultRelationDesc->rd_att->constr && resultRelationDesc->rd_att->constr->has_generated_stored)
+			ExecComputeStoredGenerated(estate, slot, CMD_UPDATE);
+
+		/* update in foreign table: let the FDW do it*/
+		slot = resultRelInfo->ri_FdwRoutine->ExecForeignUpdate(estate, resultRelInfo, slot, planSlot);
+
+		if (slot == NULL)		/* "do nothing" */
+			return NULL;
+
+		/* AFTER ROW Triggers or RETURNING expressions might reference the
+		 * tableoid column, so (re-)initialize tts_tableOid before evaluating them. */
+		slot->tts_tableOid = RelationGetRelid(resultRelationDesc);
+	}
+	else
+	{
+		LockTupleMode lockmode;
+		bool		partition_constraint_failed;
+		bool		update_indexes;
+
+		/* Constraints might reference the tableoid column, so (re-)initialize
+		 * tts_tableOid before evaluating them.*/
+		slot->tts_tableOid = RelationGetRelid(resultRelationDesc);
+
+		/* Compute stored generated columns*/
+		if (resultRelationDesc->rd_att->constr && resultRelationDesc->rd_att->constr->has_generated_stored)
+			ExecComputeStoredGenerated(estate, slot, CMD_UPDATE);
+
+		/*
+		 * Check any RLS UPDATE WITH CHECK policies
+		 *
+		 * If we generate a new candidate tuple after EvalPlanQual testing, we
+		 * must loop back here and recheck any RLS policies and constraints.
+		 * (We don't need to redo triggers, however.  If there are any BEFORE
+		 * triggers then trigger.c will have done table_tuple_lock to lock the
+		 * correct tuple, so there's no need to do them again.) */
+lreplace:;
+
+		/* ensure slot is independent, consider e.g. EPQ */
+		ExecMaterializeSlot(slot);
+
+		/* If partition constraint fails, this row might get moved to another
+		 * partition, in which case we should check the RLS CHECK policy just
+		 * before inserting into the new partition, rather than doing it here.
+		 * This is because a trigger on that partition might again change the
+		 * row.  So skip the WCO checks if the partition constraint fails. */
+		partition_constraint_failed = resultRelInfo->ri_PartitionCheck && !ExecPartitionCheck(resultRelInfo, slot, estate, false);
+
+		if (!partition_constraint_failed && resultRelInfo->ri_WithCheckOptions != NIL)
+		{
+			/* ExecWithCheckOptions() will skip any WCOs which are not of the kind we are looking for at this point. */
+			ExecWithCheckOptions(WCO_RLS_UPDATE_CHECK, resultRelInfo, slot, estate);
+		}
+
+		/* If a partition check failed, try to move the row into the right partition.*/
+		if (partition_constraint_failed)
+		{
+			bool		tuple_deleted;
+			TupleTableSlot *ret_slot;
+			TupleTableSlot *orig_slot = slot;
+			TupleTableSlot *epqslot = NULL;
+			PartitionTupleRouting *proute = mtstate->mt_partition_tuple_routing;
+			int			map_index;
+			TupleConversionMap *tupconv_map;
+
+			/* Disallow an INSERT ON CONFLICT DO UPDATE that causes the
+			 * original row to migrate to a different partition.  Maybe this
+			 * can be implemented some day, but it seems a fringe feature with
+			 * little redeeming value.*/
+			if (((ModifyTable *) mtstate->ps.plan)->onConflictAction == ONCONFLICT_UPDATE)
+				ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						 errmsg("invalid ON UPDATE specification"),
+						 errdetail("The result tuple would appear in a different partition than the original tuple.")));
+
+			/* When an UPDATE is run on a leaf partition, we will not have
+			 * partition tuple routing set up. In that case, fail with
+			 * partition constraint violation error.*/
+			if (proute == NULL)
+				ExecPartitionCheckEmitError(resultRelInfo, slot, estate);
+
+			/* Row movement, part 1.  Delete the tuple, but skip RETURNING
+			 * processing. We want to return rows from INSERT.*/
+			ExecDelete(mtstate, tupleid, oldtuple, planSlot, epqstate, estate, false, false /* canSetTag */ , true /* changingPart */ , &tuple_deleted, &epqslot);
+
+			/* For some reason if DELETE didn't happen (e.g. trigger prevented
+			 * it, or it was already deleted by self, or it was concurrently
+			 * deleted by another transaction), then we should skip the insert
+			 * as well; otherwise, an UPDATE could cause an increase in the
+			 * total number of rows across all partitions, which is clearly wrong.
+			 *
+			 * For a normal UPDATE, the case where the tuple has been the
+			 * subject of a concurrent UPDATE or DELETE would be handled by
+			 * the EvalPlanQual machinery, but for an UPDATE that we've
+			 * translated into a DELETE from this partition and an INSERT into
+			 * some other partition, that's not available, because CTID chains
+			 * can't span relation boundaries.  We mimic the semantics to a
+			 * limited extent by skipping the INSERT if the DELETE fails to
+			 * find a tuple. This ensures that two concurrent attempts to
+			 * UPDATE the same tuple at the same time can't turn one tuple
+			 * into two, and that an UPDATE of a just-deleted tuple can't resurrect it.*/
+			if (!tuple_deleted)
+			{
+				/*
+				 * epqslot will be typically NULL.  But when ExecDelete()
+				 * finds that another transaction has concurrently updated the
+				 * same row, it re-fetches the row, skips the delete, and
+				 * epqslot is set to the re-fetched tuple slot. In that case,
+				 * we need to do all the checks again.
+				 */
+				if (TupIsNull(epqslot))
+					return NULL;
+				else
+				{
+					slot = ExecFilterJunk(resultRelInfo->ri_junkFilter, epqslot);
+					goto lreplace;
+				}
+			}
+
+			/* Updates set the transition capture map only when a new subplan
+			 * is chosen.  But for inserts, it is set for each row. So after
+			 * INSERT, we need to revert back to the map created for UPDATE;
+			 * otherwise the next UPDATE will incorrectly use the one created
+			 * for INSERT.  So first save the one created for UPDATE. */
+			if (mtstate->mt_transition_capture)
+				saved_tcs_map = mtstate->mt_transition_capture->tcs_map;
+
+			/* resultRelInfo is one of the per-subplan resultRelInfos.  So we
+			 * should convert the tuple into root's tuple descriptor, since
+			 * ExecInsert() starts the search from root.  The tuple conversion
+			 * map list is in the order of mtstate->resultRelInfo[], so to
+			 * retrieve the one for this resultRel, we need to know the
+			 * position of the resultRel in mtstate->resultRelInfo[]. */
+			map_index = resultRelInfo - mtstate->resultRelInfo;
+			Assert(map_index >= 0 && map_index < mtstate->mt_nplans);
+			tupconv_map = tupconv_map_for_subplan(mtstate, map_index);
+			if (tupconv_map != NULL)
+				slot = execute_attr_map_slot(tupconv_map->attrMap, slot, mtstate->mt_root_tuple_slot);
+
+			/* Prepare for tuple routing, making it look like we're inserting into the root. */
+			Assert(mtstate->rootResultRelInfo != NULL);
+			slot = ExecPrepareTupleRouting(mtstate, estate, proute, mtstate->rootResultRelInfo, slot);
+
+			ret_slot = ExecInsert(mtstate, slot, planSlot,
+								  orig_slot, resultRelInfo,
+								  estate, canSetTag);
+
+			/* Revert ExecPrepareTupleRouting's node change. */
+			estate->es_result_relation_info = resultRelInfo;
+			if (mtstate->mt_transition_capture)
+			{
+				mtstate->mt_transition_capture->tcs_original_insert_tuple = NULL;
+				mtstate->mt_transition_capture->tcs_map = saved_tcs_map;
+			}
+
+			return ret_slot;
+		}
+
+		/* Check the constraints of the tuple.  We've already checked the
+		 * partition constraint above; however, we must still ensure the tuple
+		 * passes all other constraints, so we will call ExecConstraints() and
+		 * have it validate all remaining checks.*/
+		if (resultRelationDesc->rd_att->constr)
+			ExecConstraints(resultRelInfo, slot, estate);
+
+		/* replace the heap tuple
+		 *
+		 * Note: if es_crosscheck_snapshot isn't InvalidSnapshot, we check
+		 * that the row to be updated is visible to that snapshot, and throw a
+		 * can't-serialize error if not. This is a special-case behavior
+		 * needed for referential integrity updates in transaction-snapshot mode transactions. */
+		result = table_tuple_update(resultRelationDesc, tupleid, slot, estate->es_output_cid,
+									estate->es_snapshot, estate->es_crosscheck_snapshot, true /* wait for commit */ ,&tmfd, &lockmode, &update_indexes);
+
+		switch (result)
+		{
+			case TM_SelfModified:
+
+				/* The target tuple was already updated or deleted by the
+				 * current command, or by a later command in the current
+				 * transaction.  The former case is possible in a join UPDATE
+				 * where multiple tuples join to the same target tuple. This
+				 * is pretty questionable, but Postgres has always allowed it:
+				 * we just execute the first update action and ignore
+				 * additional update attempts.
+				 *
+				 * The latter case arises if the tuple is modified by a
+				 * command in a BEFORE trigger, or perhaps by a command in a
+				 * volatile function used in the query.  In such situations we
+				 * should not ignore the update, but it is equally unsafe to
+				 * proceed.  We don't want to discard the original UPDATE
+				 * while keeping the triggered actions based on it; and we
+				 * have no principled way to merge this update with the
+				 * previous ones.  So throwing an error is the only safe
+				 * course.
+				 *
+				 * If a trigger actually intends this type of interaction, it
+				 * can re-execute the UPDATE (assuming it can figure out how)
+				 * and then return NULL to cancel the outer update.*/
+				if (tmfd.cmax != estate->es_output_cid)
+					ereport(ERROR,(errcode(ERRCODE_TRIGGERED_DATA_CHANGE_VIOLATION),
+							 errmsg("tuple to be updated was already modified by an operation triggered by the current command"),
+							 errhint("Consider using an AFTER trigger instead of a BEFORE trigger to propagate changes to other rows.")));
+
+				/* Else, already updated by self; nothing to do */
+				return NULL;
+
+			case TM_Ok:
+				break;
+
+			case TM_Updated:
+				{
+					TupleTableSlot *inputslot;
+					TupleTableSlot *epqslot;
+
+					if (IsolationUsesXactSnapshot())
+						ereport(ERROR,(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),errmsg("could not serialize access due to concurrent update")));
+
+					/* Already know that we're going to need to do EPQ, so fetch tuple directly into the right slot. */
+					inputslot = EvalPlanQualSlot(epqstate, resultRelationDesc,resultRelInfo->ri_RangeTableIndex);
+
+					result = table_tuple_lock(resultRelationDesc, tupleid, estate->es_snapshot,inputslot, estate->es_output_cid, lockmode, LockWaitBlock, TUPLE_LOCK_FLAG_FIND_LAST_VERSION,&tmfd);
+
+					switch (result)
+					{
+						case TM_Ok:
+							Assert(tmfd.traversed);
+							epqslot = EvalPlanQual(epqstate, resultRelationDesc, resultRelInfo->ri_RangeTableIndex, inputslot);
+							if (TupIsNull(epqslot))
+								/* Tuple not passing quals anymore, exiting... */
+								return NULL;
+
+							slot = ExecFilterJunk(resultRelInfo->ri_junkFilter, epqslot);
+							goto lreplace;
+
+						case TM_Deleted:
+							/* tuple already deleted; nothing to do */
+							return NULL;
+
+						case TM_SelfModified:
+
+							/*
+							 * This can be reached when following an update chain from a tuple updated by another session,
+							 * reaching a tuple that was already updated in this transaction. If previously modified by
+							 * this command, ignore the redundant update, otherwise error out.
+							 *
+							 * See also TM_SelfModified response to table_tuple_update() above.*/
+							if (tmfd.cmax != estate->es_output_cid)
+								ereport(ERROR,(errcode(ERRCODE_TRIGGERED_DATA_CHANGE_VIOLATION),
+										 errmsg("tuple to be updated was already modified by an operation triggered by the current command"),errhint("Consider using an AFTER trigger instead of a BEFORE trigger to propagate changes to other rows.")));
+							return NULL;
+
+						default:
+							/* see table_tuple_lock call in ExecDelete() */
+							elog(ERROR, "unexpected table_tuple_lock status: %u", result);
+							return NULL;
+					}
+				}
+
+				break;
+
+			case TM_Deleted:
+				if (IsolationUsesXactSnapshot())
+					ereport(ERROR,(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),errmsg("could not serialize access due to concurrent delete")));
+				/* tuple already deleted; nothing to do */
+				return NULL;
+
+			default:
+				elog(ERROR, "unrecognized table_tuple_update status: %u",
+					 result);
+				return NULL;
+		}
+
+		/* insert index entries for tuple if necessary */
+		if (resultRelInfo->ri_NumIndices > 0 && update_indexes)
+			recheckIndexes = ExecInsertIndexTuples(slot, estate, false, NULL, NIL);
+	}
+
+	if (canSetTag)
+		(estate->es_processed)++;
+
+	/* AFTER ROW UPDATE Triggers */
+	ExecARUpdateTriggers(estate, resultRelInfo, tupleid, oldtuple, slot,recheckIndexes,mtstate->operation == CMD_INSERT ?mtstate->mt_oc_transition_capture : mtstate->mt_transition_capture);
+
+	list_free(recheckIndexes);
+
+	/* Check any WITH CHECK OPTION constraints from parent views.  We are
+	 * required to do this after testing all constraints and uniqueness
+	 * violations per the SQL spec, so we do it after actually updating the
+	 * record in the heap and all indexes.
+	 *
+	 * ExecWithCheckOptions() will skip any WCOs which are not of the kind we
+	 * are looking for at this point. */
+	if (resultRelInfo->ri_WithCheckOptions != NIL)
+		ExecWithCheckOptions(WCO_VIEW_CHECK, resultRelInfo, slot, estate);
+
+	if (resultRelInfo->ri_projectReturning)	/* Process RETURNING if present */
+		return ExecProcessReturning(resultRelInfo->ri_projectReturning,RelationGetRelid(resultRelationDesc),slot, planSlot);
+
+	return NULL;
+}
+```
+再往下就是涉及到存储引擎的部分了，我们重点看一下其对外的接口输入参数。重点是这4个参数：
+- relation - table to be modified (caller must hold suitable lock) （要更新的那个表）
+- otid - TID of old tuple to be replaced （要更新的元组ID，对应的是老的元组，更新后相当于是插入一条新元组，老元组的tid值要更新为新的tid值）
+- slot - newly constructed tuple data to store （新元组的值）
+- cid - update command ID (used for visibility test, and stored into cmax/cmin if successful) （cid值，事务相关）
+执行器层面的更新算子是建立在存储引擎提供的底层`table_tuple_update`接口之上的。是我们编写`ExecUpdate`以及`ExecModifyTable`的基础。
+```c++
+/*
+ * Update a tuple.
+
+ * Input parameters:
+ *	relation - table to be modified (caller must hold suitable lock)
+ *	otid - TID of old tuple to be replaced
+ *	slot - newly constructed tuple data to store
+ *	cid - update command ID (used for visibility test, and stored into cmax/cmin if successful)
+ *	crosscheck - if not InvalidSnapshot, also check old tuple against this
+ *	wait - true if should wait for any conflicting update to commit/abort
+
+ * Output parameters:
+ *	tmfd - filled in failure cases (see below)
+ *	lockmode - filled with lock mode acquired on tuple
+ *  update_indexes - in success cases this is set to true if new index entries are required for this tuple
+ *
+ * Normal, successful return value is TM_Ok, which means we did actually update it. */
+static inline TM_Result
+table_tuple_update(Relation rel, ItemPointer otid, TupleTableSlot *slot, CommandId cid, 
+				   Snapshot snapshot, Snapshot crosscheck, bool wait, TM_FailureData *tmfd, LockTupleMode *lockmode, bool *update_indexes)
+{
+	return rel->rd_tableam->tuple_update(rel, otid, slot, cid, 
+										 snapshot, crosscheck, wait, tmfd, lockmode, update_indexes);
+}
+```
+
+
 #### 事务
 这一块主要是要理解PG中update语句并不是原地更新元组，而是插入一条新元组。因为PG实现MVCC与Mysql，Oracle的实现方式有所不同，并不是通过undo日志实现的，相当于把undo日志记录到了原有的表中，并不是单独存放在一个地方。具体的不再细述，内容太多了，以后再分析事务部分。
 
-
+好了，内容很多，分析源码的时候，涉及到的知识点以及逻辑是非常多的，我们最好每次分析只抓一个主干，不然每个都分析，最后就会比较乱。就先分析到这里把。
 
 ---
 #### 参考文档
 [PgSQL · 源码分析 · PG优化器浅析](http://mysql.taobao.org/monthly/2016/09/07/)
+
+
