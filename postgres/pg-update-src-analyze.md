@@ -1221,6 +1221,6 @@ table_tuple_update(Relation rel, ItemPointer otid, TupleTableSlot *slot, Command
 
 ---
 #### 参考文档
-[PgSQL · 源码分析 · PG优化器浅析](http://mysql.taobao.org/monthly/2016/09/07/)
-
+[PgSQL · 源码分析 · PG优化器浅析](http://mysql.taobao.org/monthly/2016/09/07/)		
+[PgSQL · 源码分析 · PG 优化器中的pathkey与索引在排序时的使用](https://www.bookstack.cn/read/aliyun-rds-core/4db84d3c10fdb1b8.md)
 

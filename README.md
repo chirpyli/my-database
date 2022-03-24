@@ -16,8 +16,8 @@ database study, include PostgreSQL, distribute system  and so on.
 - [PostgreSQL如何添加内核函数](./postgres/PostgreSQL如何添加内核函数.md)
 - [SQL解析器](./postgres/SQL解析器.md)
 - [查询优化之子连接优化](./postgres/查询优化之子连接优化.md)
-- [PostgreSQL中UPDATE源码分析](./postgres/update-analyze.md)
-
+- [PostgreSQL中UPDATE源码分析](./postgres/pg-update-src-analyze.md)
+- [Postgres执行计划EXPLAIN源码分析](./postgres/pg-explain-src-analyze.md)
 
 ### leveldb
 - [leveldb工作原理](./leveldb/leveldb.md)
