@@ -518,4 +518,4 @@ ExplainNode(PlanState *planstate, List *ancestors, const char *relationship, con
 
 ---
 
-好了，就分析到这里吧。
+好了，可以看到源码的处理与之前猜想的相差不多，如果实现了新的算子，则要在explain.c中修改相应的代码以正确显示执行计划。就分析到这里吧。

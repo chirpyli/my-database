@@ -69,3 +69,47 @@ ExecScan(ScanState *node,
 	}
 }
 ```
+
+
+### 子查询
+
+子查询可分为相关子查询和非相关子查询。
+- 相关子查询： 指在子查询语句中引用了外层表的列属性，这就导致外层表每获得一个元组，子查询就需要重新执行一次。
+- 非相关子查询： 指子查询语句是独立的，和外层的表没有直接的关联，子查询可以单独执行一次，外层表可以重复利用子查询的执行结果。
+
+```c++
+typedef enum JoinType
+{
+	/*
+	 * The canonical kinds of joins according to the SQL JOIN syntax. Only
+	 * these codes can appear in parser output (e.g., JoinExpr nodes).
+	 */
+	JOIN_INNER,					/* matching tuple pairs only */
+	JOIN_LEFT,					/* pairs + unmatched LHS tuples */
+	JOIN_FULL,					/* pairs + unmatched LHS + unmatched RHS */
+	JOIN_RIGHT,					/* pairs + unmatched RHS tuples */
+
+	/*
+	 * Semijoins and anti-semijoins (as defined in relational theory) do not
+	 * appear in the SQL JOIN syntax, but there are standard idioms for
+	 * representing them (e.g., using EXISTS).  The planner recognizes these
+	 * cases and converts them to joins.  So the planner and executor must
+	 * support these codes.  NOTE: in JOIN_SEMI output, it is unspecified
+	 * which matching RHS row is joined to.  In JOIN_ANTI output, the row is
+	 * guaranteed to be null-extended.
+	 */
+	JOIN_SEMI,					/* 1 copy of each LHS row that has match(es) */
+	JOIN_ANTI,					/* 1 copy of each LHS row that has no match */
+
+	/*
+	 * These codes are used internally in the planner, but are not supported
+	 * by the executor (nor, indeed, by most of the planner).
+	 */
+	JOIN_UNIQUE_OUTER,			/* LHS path must be made unique */
+	JOIN_UNIQUE_INNER			/* RHS path must be made unique */
+
+	/*
+	 * We might need additional join types someday.
+	 */
+} JoinType;
+```

@@ -93,4 +93,4 @@ Query *parse_analyze(RawStmt *parseTree, const char *sourceText,Oid *paramTypes,
 }
 ```
 
-到这里一定要读一下openGauss的博文[openGauss数据库源码解析系列文章——SQL引擎源码解析（一）](https://mp.weixin.qq.com/s/XcdtzdHPRZa478ADEHxSNQ)。写的非常之好，我就不用再写了。
+到这里一定要读一下openGauss的博文[openGauss数据库源码解析系列文章——SQL引擎源码解析（一）](https://mp.weixin.qq.com/s/XcdtzdHPRZa478ADEHxSNQ)。写的非常之好，我就不用再写了。另外非常推荐《openGauss数据库核心技术》一书，书中第7章“openGauss SQL引擎”一章值得深读。
