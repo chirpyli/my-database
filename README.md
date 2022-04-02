@@ -11,13 +11,14 @@ database study, include PostgreSQL, distribute system  and so on.
 ### PostgreSQL
 
 - [词法分析与flex](./postgres/词法分析与flex.md)
-- [PostgreSQL中scan.l源码分析](./postgres/PostgreSQL中scan.l源码分析.md)
+
 - [PostgreSQL中列名表名长度限制](./postgres/PostgreSQL中表名列名长度限制.md)
 - [PostgreSQL如何添加内核函数](./postgres/PostgreSQL如何添加内核函数.md)
 - [SQL解析器](./postgres/SQL解析器.md)
 - [查询优化之子连接优化](./postgres/查询优化之子连接优化.md)
-- [PostgreSQL中UPDATE源码分析](./postgres/pg-update-src-analyze.md)
-- [Postgres执行计划EXPLAIN源码分析](./postgres/pg-explain-src-analyze.md)
+- [Postgres源码分析——scan.l](./pg-src-analyze-scaan.l.md)
+- [Postgres源码分析——UPDATE](./postgres/pg-src-analyze-update.md)
+- [Postgres源码分析——执行计划EXPLAIN](./postgres/pg-src-analyze-explain.md)
 
 ### leveldb
 - [leveldb工作原理](./leveldb/leveldb.md)
