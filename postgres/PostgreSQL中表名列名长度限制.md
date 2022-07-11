@@ -96,7 +96,8 @@ int base_yylex(YYSTYPE *lvalp, YYLTYPE *llocp, core_yyscan_t yyscanner) {
 	YYLTYPE		cur_yylloc;
 
 	/* Get next token --- we might already have it */
-	if (yyextra->have_lookahead) {
+	if (yyextra->have_lookahead) 
+	{
 		cur_token = yyextra->lookahead_token;
 		lvalp->core_yystype = yyextra->lookahead_yylval;
 		*llocp = yyextra->lookahead_yylloc;
@@ -105,10 +106,7 @@ int base_yylex(YYSTYPE *lvalp, YYLTYPE *llocp, core_yyscan_t yyscanner) {
 	} else
 		cur_token = core_yylex(&(lvalp->core_yystype), llocp, yyscanner);
 
-	/*
-	 * Check for special handling of PARTITION keyword. (see
-	 * OptFirstPartitionSpec rule in the grammar)
-	 */
+	/* Check for special handling of PARTITION keyword. (see OptFirstPartitionSpec rule in the grammar)*/
 	if (yyextra->tail_partition_magic)
 	{
 		if (cur_token == PARTITION)
@@ -118,12 +116,10 @@ int base_yylex(YYSTYPE *lvalp, YYLTYPE *llocp, core_yyscan_t yyscanner) {
 		}
 	}
 
-	/*
-	 * If this token isn't one that requires lookahead, just return it.  If it
+	/* If this token isn't one that requires lookahead, just return it.  If it
 	 * does, determine the token length.  (We could get that via strlen(), but
 	 * since we have such a small set of possibilities, hardwiring seems
-	 * feasible and more efficient --- at least for the fixed-length cases.)
-	 */
+	 * feasible and more efficient --- at least for the fixed-length cases.)*/
 	switch (cur_token)
 	{
 		case NOT:
@@ -143,22 +139,18 @@ int base_yylex(YYSTYPE *lvalp, YYLTYPE *llocp, core_yyscan_t yyscanner) {
 			return cur_token;
 	}
 
-	/*
-	 * Identify end+1 of current token.  core_yylex() has temporarily stored a
+	/* Identify end+1 of current token.  core_yylex() has temporarily stored a
 	 * '\0' here, and will undo that when we call it again.  We need to redo
-	 * it to fully revert the lookahead call for error reporting purposes.
-	 */
+	 * it to fully revert the lookahead call for error reporting purposes. */
 	yyextra->lookahead_end = yyextra->core_yy_extra.scanbuf +
 		*llocp + cur_token_length;
 	Assert(*(yyextra->lookahead_end) == '\0');
 
-	/*
-	 * Save and restore *llocp around the call.  It might look like we could
+	/* Save and restore *llocp around the call.  It might look like we could
 	 * avoid this by just passing &lookahead_yylloc to core_yylex(), but that
 	 * does not work because flex actually holds onto the last-passed pointer
 	 * internally, and will use that for error reporting.  We need any error
-	 * reports to point to the current token, not the next one.
-	 */
+	 * reports to point to the current token, not the next one. */
 	cur_yylloc = *llocp;
 
 	/* Get next token, saving outputs into lookahead variables */
@@ -228,55 +220,38 @@ int base_yylex(YYSTYPE *lvalp, YYLTYPE *llocp, core_yyscan_t yyscanner) {
 				*(yyextra->lookahead_end) = yyextra->lookahead_hold_char;
 
 				/* Get third token */
-				next_token = core_yylex(&(yyextra->lookahead_yylval),
-										llocp, yyscanner);
+				next_token = core_yylex(&(yyextra->lookahead_yylval), llocp, yyscanner);
 
 				/* If we throw error here, it will point to third token */
 				if (next_token != SCONST)
-					scanner_yyerror("UESCAPE must be followed by a simple string literal",
-									yyscanner);
+					scanner_yyerror("UESCAPE must be followed by a simple string literal", yyscanner);
 
 				escstr = yyextra->lookahead_yylval.str;
 				if (strlen(escstr) != 1 || !check_uescapechar(escstr[0]))
-					scanner_yyerror("invalid Unicode escape character",
-									yyscanner);
+					scanner_yyerror("invalid Unicode escape character", yyscanner);
 
 				/* Now restore *llocp; errors will point to first token */
 				*llocp = cur_yylloc;
 
 				/* Apply Unicode conversion */
-				lvalp->core_yystype.str =
-					str_udeescape(lvalp->core_yystype.str,
-								  escstr[0],
-								  *llocp,
-								  yyscanner);
+				lvalp->core_yystype.str = str_udeescape(lvalp->core_yystype.str, escstr[0], *llocp, yyscanner);
 
-				/*
-				 * We don't need to revert the un-truncation of UESCAPE.  What
-				 * we do want to do is clear have_lookahead, thereby consuming
-				 * all three tokens.
-				 */
+				/* We don't need to revert the un-truncation of UESCAPE.  What
+				 * we do want to do is clear have_lookahead, thereby consuming all three tokens. */
 				yyextra->have_lookahead = false;
 			}
 			else
 			{
 				/* No UESCAPE, so convert using default escape character */
-				lvalp->core_yystype.str =
-					str_udeescape(lvalp->core_yystype.str,
-								  '\\',
-								  *llocp,
-								  yyscanner);
+				lvalp->core_yystype.str = str_udeescape(lvalp->core_yystype.str, '\\', *llocp, yyscanner);
 			}
 
 			if (cur_token == UIDENT)
 			{
 				/* It's an identifier, so truncate as appropriate */
-				truncate_identifier(lvalp->core_yystype.str,
-									strlen(lvalp->core_yystype.str),
-									true);
+				truncate_identifier(lvalp->core_yystype.str, strlen(lvalp->core_yystype.str), true);
 				cur_token = IDENT;
-			}
-			else if (cur_token == USCONST)
+			} else if (cur_token == USCONST)
 			{
 				cur_token = SCONST;
 			}
@@ -295,8 +270,7 @@ extern int core_yylex(YYSTYPE * yylval_param,YYLTYPE * yylloc_param ,yyscan_t yy
                (YYSTYPE * yylval_param, YYLTYPE * yylloc_param , yyscan_t yyscanner)
 
 
-/** The main scanner function which does all the work.
- */
+/** The main scanner function which does all the work. */
 YY_DECL
 {
 	register yy_state_type yy_current_state;
@@ -346,9 +320,7 @@ YY_DECL
 		/* Support of yytext. */
 		*yy_cp = yyg->yy_hold_char;
 
-		/* yy_bp points to the position in yy_ch_buf of the start of
-		 * the current run.
-		 */
+		/* yy_bp points to the position in yy_ch_buf of the start of the current run. */
 		yy_bp = yy_cp;
 
 		yy_current_state = yy_start_state_list[yyg->yy_start];
@@ -403,10 +375,7 @@ YY_RULE_SETUP
 						return yyextra->keyword_tokens[kwnum];
 					}
 
-					/*
-					 * No.  Convert the identifier to lower case, and truncate
-					 * if necessary.
-					 */
+					/* No.  Convert the identifier to lower case, and truncate if necessary. */
 					ident = downcase_truncate_identifier(yytext, yyleng, true);     // 在这个地方，如果超出了63字符长度，会将其截断
 					yylval->str = ident;
 					return IDENT;
@@ -434,15 +403,13 @@ char *downcase_identifier(const char *ident, int len, bool warn, bool truncate) 
 	result = palloc(len + 1);
 	enc_is_single_byte = pg_database_encoding_max_length() == 1;
 
-	/*
-	 * SQL99 specifies Unicode-aware case normalization, which we don't yet
+	/* SQL99 specifies Unicode-aware case normalization, which we don't yet
 	 * have the infrastructure for.  Instead we use tolower() to provide a
 	 * locale-aware translation.  However, there are some locales where this
 	 * is not right either (eg, Turkish may do strange things with 'i' and
 	 * 'I').  Our current compromise is to use tolower() for characters with
 	 * the high bit set, as long as they aren't part of a multi-byte
-	 * character, and use an ASCII-only downcasing for 7-bit characters.
-	 */
+	 * character, and use an ASCII-only downcasing for 7-bit characters. */
 	for (i = 0; i < len; i++) {
 		unsigned char ch = (unsigned char) ident[i];
 
@@ -460,33 +427,22 @@ char *downcase_identifier(const char *ident, int len, bool warn, bool truncate) 
 	return result;
 }
 
-/*
- * truncate_identifier() --- truncate an identifier to NAMEDATALEN-1 bytes.
- *
- * The given string is modified in-place, if necessary.  A warning is
- * issued if requested.
- *
- * We require the caller to pass in the string length since this saves a
- * strlen() call in some common usages.
- */
+/* truncate_identifier() --- truncate an identifier to NAMEDATALEN-1 bytes.
+ * The given string is modified in-place, if necessary.  A warning is issued if requested.
+ * We require the caller to pass in the string length since this saves a strlen() call in some common usages. */
 void truncate_identifier(char *ident, int len, bool warn) {
 	if (len >= NAMEDATALEN)
 	{
 		len = pg_mbcliplen(ident, len, NAMEDATALEN - 1);
 		if (warn)
 		{
-			/*
-			 * We avoid using %.*s here because it can misbehave if the data
-			 * is not valid in what libc thinks is the prevailing encoding.
-			 */
+			/* We avoid using %.*s here because it can misbehave if the data
+			 * is not valid in what libc thinks is the prevailing encoding. */
 			char		buf[NAMEDATALEN];
 
 			memcpy(buf, ident, len);
 			buf[len] = '\0';
-			ereport(NOTICE,
-					(errcode(ERRCODE_NAME_TOO_LONG),
-					 errmsg("identifier \"%s\" will be truncated to \"%s\"",
-							ident, buf)));
+			ereport(NOTICE, (errcode(ERRCODE_NAME_TOO_LONG), errmsg("identifier \"%s\" will be truncated to \"%s\"", ident, buf)));
 		}
 		ident[len] = '\0';
 	}

@@ -13,7 +13,7 @@ leveldb回答了我们上面碰到的所有问题。最核心的一条，将Key�
 
 
 
-![image](./.images/leveldb.jpg)
+![image](../.images/leveldb.jpg)
 
 下面我们看一下，leveldb中的读、写、删除具体是怎么做的。最简单的是读，即因为数据的流向是`memtable`->`immutable memtable`->SST文件，所以，读的时候，也是这个读顺序，如果`memtable`中有对应key，则返回value，如果没有，读`immutable memtable`，同样的，如果`immutable memtable`中没有，则读SST文件。因为应用时，很多场景都是读取最近操作的数据，这样的场景下，这样的设计效率是非常之高的，相当于做了一层又一层的缓存，由快到慢，由小到大。写和删除有点类似，写操作，如果是之前没有写过的key，比较容易理解，直接写入`memtable`即跳跃链表中就可以了，超过大小后，会转为`immutable memtable`，进而转为SST存贮在磁盘上，即使还每来的及写入SST文件宕机了，也可以利用WAL写在log中文件的数据进行恢复，而如果是更新一个已有的key的value或者删除也是类似，leveldb中并不是先查到到key再写入新的value或者删除，而是直接新写入同一key的value到`memtable`，value的更新或者删除，会在归并时完成。那还没归并完，此时进行读怎么办？因为读的顺序是先从`memtable`到`immutable memtable`再到SST，所以，确保了一定可以读到最新的写的值，即使归并没有完成。为什么这么设计呢？因为普通机械磁盘的性质决定的，对于普通机械磁盘顺序写的性能要比随机写大很多，所以，在涉及到数据库具体的存储优化时，要看具体的存储介质的性质进行优化，同时也要看应用的具体场景。
 

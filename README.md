@@ -19,6 +19,7 @@ database study, include PostgreSQL, distribute system  and so on.
 - [Postgres源码分析——scan.l](./pg-src-analyze-scaan.l.md)
 - [Postgres源码分析——UPDATE](./postgres/pg-src-analyze-update.md)
 - [Postgres源码分析——执行计划EXPLAIN](./postgres/pg-src-analyze-explain.md)
+- [Postgres源码分析——CREATE FUNCTION](./postgres/pg-src-analyze-create-function.md)
 
 ### leveldb
 - [leveldb工作原理](./leveldb/leveldb.md)
