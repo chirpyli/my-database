@@ -28,19 +28,12 @@ exec_simple_query
 语法表示可查看gram.y中的定义。
 ```c++
 simple_select:
-			SELECT hint_string opt_all_clause opt_target_list
+			SELECT opt_all_clause opt_target_list
 			into_clause from_clause where_clause
 			group_clause having_clause window_clause
 				{
 					SelectStmt *n = makeNode(SelectStmt);
-					n->targetList = $4;
-					n->intoClause = $5;
-					n->fromClause = $6;
-					n->whereClause = $7;
-					n->groupClause = ($8)->list;
-					n->havingClause = $9;
-					n->windowClause = $10;
-					n->comment = $2;
+					// ......
 					$$ = (Node *)n;
 				}
 from_clause:
