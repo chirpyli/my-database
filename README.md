@@ -23,6 +23,9 @@ database study, include PostgreSQL, distribute system  and so on.
 - [Postgres源码分析——CREATE VIEW](./postgres/pg-src-analyze-create-view.md)
 - [逻辑优化——子查询优化](./query-optimizer/subquery-optimizer.md)
 - [Postgres源码分析——UPDATE分区表](./postgres/update-partiton-source-analyze.md)
+- [Postgres源码分析—— ValueScan](./postgres/pg-src-analyze-valuescan.md)
+- [Postgres源码分析 —— FunctionScan](./postgres/pg-src-analyze-create-function.md)
+- [Postgres源码分析 —— 范围表](./postgres/pg-src-analyze-cte.md)
 ### leveldb
 - [leveldb工作原理](./leveldb/leveldb.md)
 - [leveldb学习笔记](./leveldb/leveldb学习笔记1.md)
