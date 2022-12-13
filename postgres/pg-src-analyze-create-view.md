@@ -90,7 +90,21 @@ exec_simple_query
                                 --> SetRelationRuleStatus                
 --> PortalDrop
 ```
-从上面的主流程可以看到，创建视图的最后是在pg_rewrite系统表中国插入了一条SELECT规则同时是INSTEAD规则。下面我们看一下系统表pg_rewrite的定义，其存储重写规则。
+从上面的主流程可以看到，创建视图的最后是在pg_rewrite系统表中国插入了一条SELECT规则同时是INSTEAD规则。
+
+我们看一下其插入的结果：
+```sql
+postgres@postgres=# select * from pg_rewrite order by oid desc limit 1;
+oid        | 16390
+rulename   | _RETURN
+ev_class   | 16387   -- 视图vt1的表oid
+ev_type    | 1
+ev_enabled | O
+is_instead | t       -- instead规则
+ev_qual    | <>
+ev_action  | ({QUERY :commandType 1 :querySource 0 :canSetTag true :utilityStmt <> :resultRelation 0 :hasAggs false :hasWindowFuncs false :hasTargetSRFs false :hasSubLinks false :hasDistinctOn false :hasRecursive false :hasModifyingCTE false :hasForUpdate false :hasRowSecurity false :cteList <> :rtable ({RTE :alias {ALIAS :aliasname old :colnames <>} :eref {ALIAS :aliasname old :colnames ("a" "b")} :rtekind 0 :relid 16387 :relkind v :rellockmode 1 :tablesample <> :lateral false :inh false :inFromCl false :requiredPerms 0 :checkAsUser 0 :selectedCols (b) :insertedCols (b) :updatedCols (b) :extraUpdatedCols (b) :securityQuals <>} {RTE :alias {ALIAS :aliasname new :colnames <>} :eref {ALIAS :aliasname new :colnames ("a" "b")} :rtekind 0 :relid 16387 :relkind v :rellockmode 1 :tablesample <> :lateral false :inh false :inFromCl false :requiredPerms 0 :checkAsUser 0 :selectedCols (b) :insertedCols (b) :updatedCols (b) :extraUpdatedCols (b) :securityQuals <>} {RTE :alias <> :eref {ALIAS :aliasname t1 :colnames ("a" "b")} :rtekind 0 :relid 16384 :relkind r :rellockmode 1 :tablesample <> :lateral false :inh true :inFromCl true :requiredPerms 2 :checkAsUser 0 :selectedCols (b 8 9) :insertedCols (b) :updatedCols (b) :extraUpdatedCols (b) :securityQuals <>}) :jointree {FROMEXPR :fromlist ({RANGETBLREF :rtindex 3}) :quals <>} :targetList ({TARGETENTRY :expr {VAR :varno 3 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnosyn 3 :varattnosyn 1 :location 26} :resno 1 :resname a :ressortgroupref 0 :resorigtbl 16384 :resorigcol 1 :resjunk false} {TARGETENTRY :expr {VAR :varno 3 :varattno 2 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnosyn 3 :varattnosyn 2 :location 26} :resno 2 :resname b :ressortgroupref 0 :resorigtbl 16384 :resorigcol 2 :resjunk false}) :override 0 :onConflict <> :returningList <> :groupClause <> :groupingSets <> :havingQual <> :windowClause <> :distinctClause <> :sortClause <> :limitOffset <> :limitCount <> :limitOption 0 :rowMarks <> :setOperations <> :constraintDeps <> :withCheckOptions <>})
+```
+下面我们看一下系统表pg_rewrite的定义，其存储重写规则。
 ```sql
 postgres@postgres=# \d pg_rewrite
                Table "pg_catalog.pg_rewrite"
@@ -108,6 +122,8 @@ Indexes:
     "pg_rewrite_oid_index" UNIQUE, btree (oid)
     "pg_rewrite_rel_rulename_index" UNIQUE, btree (ev_class, rulename)
 ```
+
+
 规则工作原理：对于每个规则（ 一个pg_rewrite元组），该元组的ev_class属性表示该规则适用的表名，如果在该表上执行特定的命令（ev_type）且满足了规则的条件（ev_qual）时，用规则的动作（ev_action）替换原始命令的动作或者将规则的动作附加在原始命令之前。
 
 创建视图时插入的是INSTEAD规则，INSTEAD规则执行的动作就是用规则中定义的动作代替原始的查询树中的对规则所在表的引用。具体的，在创建视图时，系统会自动按照其定义生成相应的规则，当查询涉及该视图时，查询重写模块都会用对应的规则对该查询进行重写，将对视图的查询改写为对基本表的查询。在生成视图规则时，规则动作是视图创建命令中SELECT语句的拷贝，并且该规则时无条件的INSTEAD规则。
