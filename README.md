@@ -31,7 +31,7 @@ database study, include PostgreSQL, distribute system  and so on.
 - [Postgres源码分析——CREATE CAST](./postgres/pg-src-analyze-create-cast.md)
 - [Postgres源码分析——CTE](./postgres/pg-src-analyze-cte.md)
 - [Postgres源码分析——创建分区表](./postgres/pg-src-analyze-create-partition-table.md)
-
+- [Postgres源码分析——建表含有序列](./postgres/pg-src-analyze-create-table-series.md)
 ### leveldb
 - [leveldb工作原理](./leveldb/leveldb.md)
 - [leveldb学习笔记](./leveldb/leveldb学习笔记1.md)
