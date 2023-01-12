@@ -111,9 +111,17 @@ exec_simple_query
                             --> transformAExprOp
                         --> makeTargetEntry
                             --> make_op // 构造操作符表达式Expr节点OpExpr
-                                --> oper // search for a binary operator
-                                    --> enforce_generic_type_consistency
-                                    --> make_fn_arguments
+                                --> oper // search for a binary operator、
+                                    --> ket_ok = make_oper_cache_key // 先在缓存中找, 找到返回
+                                        --> DeconstructQualifiedName  // 获取操作符name, namespace
+                                        --> fetch_search_path_array
+                                            --> recomputeNamespacePath();
+                                    --> if (key_ok)
+                                        --> find_oper_cache_entry   
+                                    --> binary_oper_exact // 如果缓存中没有找到
+                                        --> OpernameGetOprid  // 查找pg_operator系统表找
+                                --> enforce_generic_type_consistency
+                                --> make_fn_arguments
 --> pg_plan_queries
     --> standard_planner
         --> subquery_planner

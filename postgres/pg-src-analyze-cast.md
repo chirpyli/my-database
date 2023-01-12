@@ -259,3 +259,9 @@ Datum int4_numeric(PG_FUNCTION_ARGS)
 ```
 
 其他的类型转换与之类似，只是部分细节不同。
+
+---
+参考文档：
+[Oracle vs PostgreSQL，研发注意事项（9）- PostgreSQL数据类型转换规则#1](http://blog.itpub.net/6906/viewspace-2647211/)
+[Oracle vs PostgreSQL，研发注意事项（10）- PostgreSQL数据类型转换规则#2](http://blog.itpub.net/6906/viewspace-2647309/)
+[Oracle vs PostgreSQL，研发注意事项（11）- PostgreSQL数据类型转换规则#3](http://blog.itpub.net/6906/viewspace-2647394/)
