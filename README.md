@@ -47,7 +47,7 @@ database study, include PostgreSQL, distribute system  and so on.
 
 ### mysql
 - [MySQL源码分析——除法运算符](./mysql/mysql-src-analyze-operator-div.md)
-
+- [MySQL源码分析——str_to_date函数](./mysql/mysql-src-analyze-str_to_date.md)
 ### leveldb
 - [leveldb工作原理](./leveldb/leveldb.md)
 - [leveldb学习笔记](./leveldb/leveldb学习笔记1.md)
