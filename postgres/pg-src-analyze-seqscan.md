@@ -129,7 +129,7 @@ pg_plan_queries
                                         --> set_baserel_size_estimates	// 选择率计算，计算代价Cost要用
                             --> set_base_rel_pathlists
                                 --> set_rel_pathlist // Build access paths for a base relation
-                                    --> set_values_pathlist
+                                    --> set_plain_rel_pathlist
                                         --> create_seqscan_path // 生成顺序扫描路径
                             --> make_rel_from_joinlist
                     --> apply_scanjoin_target_to_paths
