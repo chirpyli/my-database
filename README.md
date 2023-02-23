@@ -23,6 +23,7 @@ database study, include PostgreSQL, distribute system  and so on.
 - [Postgres源码分析——执行计划EXPLAIN](./postgres/pg-src-analyze-explain.md)
 
 - [Postgres源码分析——UPDATE分区表](./postgres/update-partiton-source-analyze.md)
+- [Postgres源码分析——SeqScan](./postgres/pg-src-analyze-seqscan.md)
 - [Postgres源码分析—— ValueScan](./postgres/pg-src-analyze-valuescan.md)
 - [Postgres源码分析 —— FunctionScan](./postgres/pg-src-analyze-create-function.md)
 
