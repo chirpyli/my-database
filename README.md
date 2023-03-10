@@ -42,6 +42,7 @@ database study, include PostgreSQL, distribute system  and so on.
 
 #### 源码分析 —— 建表相关
 
+- [Postgres源码分析——CREATE DATABASE](./postgres/pg-src-analyze-create-database.md)
 - [Postgres源码分析——CREATE VIEW](./postgres/pg-src-analyze-create-view.md)
 - [Postgres源码分析——创建分区表](./postgres/pg-src-analyze-create-partition-table.md)
 - [Postgres源码分析——建表含有序列](./postgres/pg-src-analyze-create-table-series.md)
