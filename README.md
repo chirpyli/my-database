@@ -49,6 +49,8 @@ database study, include PostgreSQL, distribute system  and so on.
 - [Postgres源码分析——建表含有序列](./postgres/pg-src-analyze-create-table-series.md)
 - [Postgres源码分析 —— 范围表](./postgres/pg-src-analyze-cte.md)
 
+### greenplum
+- [Greenplum执行计划分析](./greenplum/gp-plan-analyze.md)
 
 ### mysql
 - [MySQL源码分析——除法运算符](./mysql/mysql-src-analyze-operator-div.md)
