@@ -51,7 +51,7 @@ database study, include PostgreSQL, distribute system  and so on.
 
 ### greenplum
 - [Greenplum执行计划分析](./greenplum/gp-plan-analyze.md)
-
+- [Greenplum源码分析——简单查询SELECT](./greenplum/gp-src-analyze-select.md)
 ### mysql
 - [MySQL源码分析——除法运算符](./mysql/mysql-src-analyze-operator-div.md)
 - [MySQL源码分析——str_to_date函数](./mysql/mysql-src-analyze-str_to_date.md)
