@@ -65,3 +65,4 @@ database study, include PostgreSQL, distribute system  and so on.
 ### 行业相关
 - [数据库开源项目参考](./数据库开源项目参考.md)
 - [数据库行业认识](./数据库行业认识.md)
+- [对OLTP、OLAP、HTAP的一点点思考](./对HTAP的一点点思考.md)
