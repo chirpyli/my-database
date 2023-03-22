@@ -1,6 +1,19 @@
 ### Greenplum源码分析 —— SELECT
 这里我们简单分析一下在Greenplum中select查询的源码，PG的源码我们都比较熟了，这里重点看一下greenplum中有什么不同之处呢？或者说，在greenplum中，查询的大致流程是如何呢？对此我们这里通过一条简单的SQL语句来进行分析。
 
+在进行分析之前，我们先回顾一下在Greenplum中SQL的执行过程，有个宏观的理解：
+0. The system at rest
+1. Client connects via the entry postmaster
+2. Entry postmaster forks a new backend -- the QD 
+3. QD connects to segment via the segment postmasters
+4. Segment postmaster for initial gang of QEs
+5. Client submits a query to the QD
+6. QD plans query and submits plans to QEs
+7. QD and QEs setup interconnect routes according to plan
+8. QD and QEs execute their slices sending tuples up the slice tree
+9. QEs return status to QD
+10. QD returns result set and status to the client
+
 #### 执行计划
 我们先看一条简单的查询语句在Greenplum中的执行计划，可以看到，与PG最不一样的就是多了一个在master进行Gather Motion的操作。
 ```sql
@@ -26,7 +39,7 @@ postgres=# explain select * from t1 limit 3;
 
 #### 源码分析
 
-greenplum是分布式数据库，相比PG，其要多节点协同工作，需要生成分布式执行计划，为了分布式执行计划的生成以及分发执行，gp相对pg增加了很多内容，比如Interconnect，比如重分布、广播等，这里面的东西还是非常多的，后续再进行分析。
+greenplum是分布式数据库，相比PG，其要多节点协同工作，需要生成分布式执行计划，为了分布式执行计划的生成以及分发执行，gp相对pg增加了很多内容，比如Interconnect，比如重分布、广播等，这里面的东西还是非常多的，后续再进行分析。关于这部分的源码可以查看gpdb/src/backend/cdb中的内容，其中有个分发执行计划相关解释的[cdb/dispatcher/README.md](https://github.com/greenplum-db/gpdb/blob/main/src/backend/cdb/dispatcher/README.md)说明可以阅读一下。
 
 关键数据结构：
 ```c++
@@ -91,7 +104,7 @@ exec_simple_query
 					--> ExecInitMotion
 						--> ExecInitLimit
 							--> ExecInitSeqScan
-			--> CdbDispatchPlan
+			--> CdbDispatchPlan    // 分发执行计划
 				--> serializeParamsForDispatch
 				--> cdbdisp_dispatchX
 --> PortalRun
