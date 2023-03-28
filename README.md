@@ -10,7 +10,13 @@ database study, include PostgreSQL, distribute system  and so on.
 
 
 ### SQL引擎
+
+#### 解析器
 - [词法分析与flex](./postgres/词法分析与flex.md)
+
+#### 优化器
+
+- [逻辑优化——常量表达式化简](./query-optimizer/simplify_const_expression.md)
 
 ### PostgreSQL
 
