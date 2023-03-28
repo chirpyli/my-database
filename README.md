@@ -8,10 +8,14 @@ database study, include PostgreSQL, distribute system  and so on.
 - [SQL必知必会笔记](./sql/SQL必知必会笔记.md)
 - [SQL查询](./sql/sql-select.md)
 
+
+### SQL引擎
+- [词法分析与flex](./postgres/词法分析与flex.md)
+
 ### PostgreSQL
 
 #### 源码分析——DML
-- [词法分析与flex](./postgres/词法分析与flex.md)
+
 
 - [PostgreSQL中列名表名长度限制](./postgres/PostgreSQL中表名列名长度限制.md)
 - [PostgreSQL如何添加内核函数](./postgres/PostgreSQL如何添加内核函数.md)
