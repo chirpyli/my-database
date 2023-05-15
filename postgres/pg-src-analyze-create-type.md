@@ -246,7 +246,7 @@ ObjectAddress DefineCompositeType(RangeVar *typevar, List *coldeflist)
 	ObjectAddress address;
 
 	/* now set the parameters for keys/inheritance etc. All of these are uninteresting for composite types... */
-	createStmt->relation = typevar;
+	createStmt->relation = typevar;    // 可以看到这里将create type转为了 create table， 内部是通过建表实现的复合类型
 	createStmt->tableElts = coldeflist;
 	createStmt->inhRelations = NIL;
 	createStmt->constraints = NIL;
@@ -277,5 +277,160 @@ ObjectAddress DefineCompositeType(RangeVar *typevar, List *coldeflist)
 	DefineRelation(createStmt, RELKIND_COMPOSITE_TYPE, InvalidOid, &address, NULL);  // 通过创建表，创建新的复合类型，但不是用户能使用的表
 
 	return address;
+}
+```
+
+我们继续看一下DefineRelation中的实现：
+```c++
+DefineRelation()
+    --> heap_create_with_catalog()
+        --> heap_create()
+        --> AddNewRelationType()
+            --> TypeCreate()
+        --> TypeCreate()
+```
+下面这段代码要认真研读：
+```c++
+heap_create_with_catalog()
+{
+    // 省略代码...
+    /* Since defining a relation also defines a complex type, we add a new
+	 * system type corresponding to the new relation.  The OID of the type can
+	 * be preselected by the caller, but if reltypeid is InvalidOid, we'll
+	 * generate a new OID for it.
+	 * NOTE: we could get a unique-index failure here, in case someone else is
+	 * creating the same type name in parallel but hadn't committed yet when
+	 * we checked for a duplicate name above.*/
+	new_type_addr = AddNewRelationType(relname, relnamespace, relid, relkind, ownerid, reltypeid, new_array_oid);
+	new_type_oid = new_type_addr.objectId;
+	if (typaddress)
+		*typaddress = new_type_addr;
+
+	/* Now make the array type if wanted. */
+	if (OidIsValid(new_array_oid))
+	{
+		char	   *relarrayname;
+		relarrayname = makeArrayTypeName(relname, relnamespace);
+
+		TypeCreate(new_array_oid,	/* force the type's OID to this */
+				   relarrayname,	/* Array type name */
+				   relnamespace,	/* Same namespace as parent */
+				   InvalidOid,	/* Not composite, no relationOid */
+				   0,			/* relkind, also N/A here */
+				   ownerid,		/* owner's ID */
+				   -1,			/* Internal size (varlena) */
+				   TYPTYPE_BASE,	/* Not composite - typelem is */
+				   TYPCATEGORY_ARRAY,	/* type-category (array) */
+				   false,		/* array types are never preferred */
+				   DEFAULT_TYPDELIM,	/* default array delimiter */
+				   F_ARRAY_IN,	/* array input proc */
+				   F_ARRAY_OUT, /* array output proc */
+				   F_ARRAY_RECV,	/* array recv (bin) proc */
+				   F_ARRAY_SEND,	/* array send (bin) proc */
+				   InvalidOid,	/* typmodin procedure - none */
+				   InvalidOid,	/* typmodout procedure - none */
+				   F_ARRAY_TYPANALYZE,	/* array analyze procedure */
+				   new_type_oid,	/* array element type - the rowtype */
+				   true,		/* yes, this is an array type */
+				   InvalidOid,	/* this has no array type */
+				   InvalidOid,	/* domain base type - irrelevant */
+				   NULL,		/* default value - none */
+				   NULL,		/* default binary representation */
+				   false,		/* passed by reference */
+				   TYPALIGN_DOUBLE, /* alignment - must be the largest! */
+				   TYPSTORAGE_EXTENDED, /* fully TOASTable */
+				   -1,			/* typmod */
+				   0,			/* array dimensions for typBaseType */
+				   false,		/* Type NOT NULL */
+				   InvalidOid);
+
+		pfree(relarrayname);
+	}
+}
+
+/* --------------------------------
+ *		AddNewRelationType -
+ *
+ *		define a composite type corresponding to the new relation
+ * --------------------------------
+ */
+static ObjectAddress AddNewRelationType(const char *typeName, Oid typeNamespace, Oid new_rel_oid, char new_rel_kind, Oid ownerid, Oid new_row_type, Oid new_array_type)
+{
+	return TypeCreate(new_row_type,	/* optional predetermined OID */
+				   typeName,	/* type name */
+				   typeNamespace,	/* type namespace */
+				   new_rel_oid, /* relation oid */
+				   new_rel_kind,	/* relation kind */
+				   ownerid,		/* owner's ID */
+				   -1,			/* internal size (varlena) */
+				   TYPTYPE_COMPOSITE,	/* type-type (composite) */
+				   TYPCATEGORY_COMPOSITE,	/* type-category (ditto) */
+				   false,		/* composite types are never preferred */
+				   DEFAULT_TYPDELIM,	/* default array delimiter */
+				   F_RECORD_IN, /* input procedure */
+				   F_RECORD_OUT,	/* output procedure */
+				   F_RECORD_RECV,	/* receive procedure */
+				   F_RECORD_SEND,	/* send procedure */
+				   InvalidOid,	/* typmodin procedure - none */
+				   InvalidOid,	/* typmodout procedure - none */
+				   InvalidOid,	/* analyze procedure - default */
+				   InvalidOid,	/* array element type - irrelevant */
+				   false,		/* this is not an array type */
+				   new_array_type,	/* array type if any */
+				   InvalidOid,	/* domain base type - irrelevant */
+				   NULL,		/* default value - none */
+				   NULL,		/* default binary representation */
+				   false,		/* passed by reference */
+				   TYPALIGN_DOUBLE, /* alignment - must be the largest! */
+				   TYPSTORAGE_EXTENDED, /* fully TOASTable */
+				   -1,			/* typmod */
+				   0,			/* array dimensions for typBaseType */
+				   false,		/* Type NOT NULL */
+				   InvalidOid);
+}
+
+// 创建类型，向pg_type系统表中插入数据
+/* ----------------------------------------------------------------
+ *		TypeCreate
+ *
+ *		This does all the necessary work needed to define a new type.
+ *
+ *		Returns the ObjectAddress assigned to the new type.
+ *		If newTypeOid is zero (the normal case), a new OID is created;
+ *		otherwise we use exactly that OID.
+ * ---------------------------------------------------------------*/
+ObjectAddress TypeCreate(Oid newTypeOid,
+		   const char *typeName,
+		   Oid typeNamespace,
+		   Oid relationOid,		/* only for relation rowtypes */
+		   char relationKind,	/* ditto */
+		   Oid ownerId,
+		   int16 internalSize,
+		   char typeType,
+		   char typeCategory,
+		   bool typePreferred,
+		   char typDelim,
+		   Oid inputProcedure,
+		   Oid outputProcedure,
+		   Oid receiveProcedure,
+		   Oid sendProcedure,
+		   Oid typmodinProcedure,
+		   Oid typmodoutProcedure,
+		   Oid analyzeProcedure,
+		   Oid elementType,
+		   bool isImplicitArray,
+		   Oid arrayType,
+		   Oid baseType,
+		   const char *defaultTypeValue,	/* human readable rep */
+		   char *defaultTypeBin,	/* cooked rep */
+		   bool passedByValue,
+		   char alignment,
+		   char storage,
+		   int32 typeMod,
+		   int32 typNDims,		/* Array dimensions for baseType */
+		   bool typeNotNull,
+		   Oid typeCollation)
+{
+    // ......
 }
 ```
