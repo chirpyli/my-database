@@ -824,7 +824,6 @@ static TupleTableSlot *ExecModifyTable(PlanState *pstate)
 
 我们看一下具体执行Update的实现
 ```c++
-```c++
 /* ----------------------------------------------------------------
  *		ExecUpdate
  *
