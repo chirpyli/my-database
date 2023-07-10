@@ -43,6 +43,7 @@ database study, include PostgreSQL, distribute system  and so on.
 
 - [Postgres源码分析——CTE](./postgres/pg-src-analyze-cte.md)
 - [Postgres源码分析——绑定变量](./postgres/pg-src-analyze-cacheplan-1.md)
+- [Postgres源码分析——COPY](./postgres/pg-src-analyze-copy.md)
 
 #### 源码分析 —— 类型系统
 - [Postgres源码分析——CREATE TYPE](./postgres/pg-src-analyze-create-type.md)
