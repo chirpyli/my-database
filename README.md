@@ -30,6 +30,7 @@ database study, include PostgreSQL, distribute system  and so on.
 - [逻辑优化——子查询优化](./query-optimizer/subquery-optimizer.md)
 - [Postgres源码分析——scan.l](./pg-src-analyze-scaan.l.md)
 - [Postgres源码分析——UPDATE](./postgres/pg-src-analyze-update.md)
+- [Postgres源码分析——INSERT](./postgres/pg-src-analyze-insert.md)
 - [Postgres源码分析——执行计划EXPLAIN](./postgres/pg-src-analyze-explain.md)
 
 - [Postgres源码分析——UPDATE分区表](./postgres/update-partiton-source-analyze.md)
@@ -59,6 +60,9 @@ database study, include PostgreSQL, distribute system  and so on.
 - [Postgres源码分析——创建分区表](./postgres/pg-src-analyze-create-partition-table.md)
 - [Postgres源码分析——建表含有序列](./postgres/pg-src-analyze-create-table-series.md)
 - [Postgres源码分析 —— 范围表](./postgres/pg-src-analyze-cte.md)
+
+#### 源码分析 —— 日志相关
+- [Postgres源码分析——CHECKPOINT](./postgres/pg-src-analyze-checkpoint.md)
 
 ### greenplum
 - [Greenplum执行计划分析](./greenplum/gp-plan-analyze.md)
