@@ -64,6 +64,9 @@ database study, include PostgreSQL, distribute system  and so on.
 #### 源码分析 —— 日志相关
 - [Postgres源码分析——CHECKPOINT](./postgres/pg-src-analyze-checkpoint.md)
 
+#### 源码分析 —— 后台进程
+- [Postgres源码分析——bgwriter](./postgres/pg-src-analyze-bgwriter.md)
+
 ### greenplum
 - [Greenplum执行计划分析](./greenplum/gp-plan-analyze.md)
 - [Greenplum源码分析——简单查询SELECT](./greenplum/gp-src-analyze-select.md)
