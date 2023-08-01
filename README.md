@@ -66,6 +66,8 @@ database study, include PostgreSQL, distribute system  and so on.
 
 #### 源码分析 —— 后台进程
 - [Postgres源码分析——bgwriter](./postgres/pg-src-analyze-bgwriter.md)
+- [Postgres源码分析——启动流程](./postgres/pg-src-analyze-start.md)
+
 
 ### greenplum
 - [Greenplum执行计划分析](./greenplum/gp-plan-analyze.md)
