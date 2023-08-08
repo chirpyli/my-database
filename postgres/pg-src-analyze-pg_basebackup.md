@@ -5,9 +5,9 @@
 
 我们知道pg_basebackup是一个进行基础备份的工具，除了使用这个工具，还可以用底层API的方式进行基础备份，主要过程如下：
 1. 连接到数据库
-2. 执行`select pg_start_backup('lable')`命令。（会强制发生一次checkpoint）
-3. 执行备份，把数据目录进行复制
-4. 执行`select pg_stop_backup`命令
+2. 执行`select pg_start_backup('lable')`命令。（会强制发生一次checkpoint，并将检查点记录到backup_label文件中）
+3. 执行备份，把数据目录进行复制（包含backup_label）
+4. 执行`select pg_stop_backup`命令，（删除backup_label文件，并在WAL日志中写入一条`XLOG_BACKUP_END`的记录，当备节点回放到该记录时，就知道备份结束了，数据达到了一致点，可以对外提供服务了）
 5. 备份过程中产生的WAL日志进行复制
 
 其实，pg_basebackup工具就是对底层API的封装，其主要过程是相同的，但具体到代码，并不是直接调用的`pg_start_backup`,`pg_stop_backup`函数，而是通过一些命令的形式，这些特殊的命令定义在`src/backend/replication/repl_gram.y`中，后面我们会进行分析。
