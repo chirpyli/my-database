@@ -1,6 +1,5 @@
 ## pg_basebackup分析
 
-
 涉及到的代码主要在`src/backend/replication`以及`bin/pg_basebackup`中。
 
 我们知道pg_basebackup是一个进行基础备份的工具，除了使用这个工具，还可以用底层API的方式进行基础备份，主要过程如下：
@@ -76,12 +75,12 @@ current_logfiles  pg_ident.conf  pg_snapshots  PG_VERSION
 global            pg_logical     pg_stat       pg_wal
 log               pg_multixact   pg_stat_tmp   pg_xact
 postgres@slpc:~/pgsql/pgbak$ cat backup_label 
-START WAL LOCATION: 0/C000028 (file 00000001000000000000000C)
-CHECKPOINT LOCATION: 0/C000060
-BACKUP METHOD: streamed
-BACKUP FROM: primary
-START TIME: 2023-08-02 17:15:58 CST
-LABEL: pg14bak
+START WAL LOCATION: 0/C000028 (file 00000001000000000000000C)    备份开始时日志的位置
+CHECKPOINT LOCATION: 0/C000060                                   检查点的位置
+BACKUP METHOD: streamed                                          备份方法
+BACKUP FROM: primary                                             备份源    
+START TIME: 2023-08-02 17:15:58 CST                              备份开始的物理时间
+LABEL: pg14bak                                                   备份标签
 START TIMELINE: 1
 ```
 
@@ -272,4 +271,5 @@ SendBaseBackup(BaseBackupCmd *cmd)
     --> do_pg_start_backup(opt->label, opt->fastcheckpoint, &starttli, labelfile, &tablespaces, tblspc_map_file);
         --> RequestCheckpoint(CHECKPOINT_FORCE | CHECKPOINT_WAIT | (fast ? CHECKPOINT_IMMEDIATE : 0));
             --> CreateCheckPoint(flags | CHECKPOINT_IMMEDIATE);
+    --> do_pg_stop_backup(labelfile->data, !opt->nowait, &endtli);
 ```
