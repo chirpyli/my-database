@@ -367,7 +367,152 @@ void RequestCheckpoint(int flags)
 ```
 
 ### checkpoint的执行
-具体的CHECKPOINT是如何被执行的。其核心函数`CreateCheckPoint`后续再进行分析。
+具体的CHECKPOINT是如何被执行的？这里分析一下`CreateCheckPoint`函数的实现。CheckPoint实现的要点，记录本次检查点信息，删除历史WAL日志记录，刷脏页到磁盘。主流程如下：
+```c++
+CheckpointerMain()
+--> CreateCheckPoint(flags)
+	--> curInsert = XLogBytePosToRecPtr(Insert->CurrBytePos);
+	--> checkPoint.redo = curInsert;
+	--> CheckPointGuts(checkPoint.redo, flags);
+		--> CheckPointBuffers(flags); 
+			--> BufferSync(flags);
+				--> SyncOneBuffer(buf_id, false, &wb_context)
+					--> FlushBuffer(bufHdr, NULL);
+						--> smgrwrite
+							--> mdwrite
+	--> UpdateControlFile();
+	--> RemoveOldXlogFiles(_logSegNo, RedoRecPtr, recptr);
+```
+其中一个很重要的点是记录本次检查点信息，检查点会把本次检查点开始时的日志插入点`Insert->CurrBytePos`记录到`RedoRecPtr`变量中，这样在数据库故障恢复时，就可以以此为起点进行恢复。为啥是这个位置呢？在此之前的WAL日志，对应的Buffer中的脏页需要全部刷盘，也就是说，在此位置之前的WAL日志是不需要进行回放的，因为页已经落盘了。崩溃恢复的起点，也就是Redo位置，是从这个位置开始，Buffer中没有落盘的开始的位置，因为在执行Checkpoint的过程中，数据库依旧在运行，业务仍然在不断产生WAL日志，以及Buffer中会缓存脏页，这部分并没有进行落盘，所以当数据库发生崩溃恢复时，如果从Redo之前的位置开始回放，则因为页已经持久化了，无须进行回放，所以，回放的起点就是Redo的位置。这篇博文有图片解释，可能会生动一些，可参考[Postgresql Checkpoint 原理](https://zhmin.github.io/posts/postgresql-checkpoint/)
+```c++
+void CreateCheckPoint(int flags)
+{
+	CheckPoint	checkPoint;
+	XLogRecPtr	recptr;
+	XLogSegNo	_logSegNo;
+	XLogCtlInsert *Insert = &XLogCtl->Insert;
+	uint32		freespace;
+	XLogRecPtr	PriorRedoPtr;
+	XLogRecPtr	curInsert;
+	XLogRecPtr	last_important_lsn;
+
+	// ...
+
+	/* Begin filling in the checkpoint WAL record */
+	MemSet(&checkPoint, 0, sizeof(checkPoint));
+	checkPoint.time = (pg_time_t) time(NULL);
+
+	/* Get location of last important record . */
+	last_important_lsn = GetLastImportantRecPtr();
+
+	/* We must block concurrent insertions while examining insert state to determine the checkpoint REDO pointer. */
+	WALInsertLockAcquireExclusive();
+	curInsert = XLogBytePosToRecPtr(Insert->CurrBytePos);
+
+	/* If this isn't a shutdown or forced checkpoint, and if there has been no WAL activity requiring a checkpoint, skip it.  */
+	if ((flags & (CHECKPOINT_IS_SHUTDOWN | CHECKPOINT_END_OF_RECOVERY | CHECKPOINT_FORCE)) == 0)
+	{
+		// 如果“重要”事务日志还处于上次CheckPoint的位置，则本次CheckPoint可以不用执行
+		if (last_important_lsn == ControlFile->checkPoint)
+		{
+			WALInsertLockRelease();
+			END_CRIT_SECTION();
+			ereport(DEBUG1, (errmsg_internal("checkpoint skipped because system is idle")));
+			return;
+		}
+	}
+
+	/* Compute new REDO record ptr = location of next XLOG record. */
+	// 如果当前页面没有空闲空间，则推进到下一个页面
+	freespace = INSERT_FREESPACE(curInsert);
+	if (freespace == 0)
+	{
+		if (XLogSegmentOffset(curInsert, wal_segment_size) == 0)
+			curInsert += SizeOfXLogLongPHD;
+		else
+			curInsert += SizeOfXLogShortPHD;
+	}
+	// 记录本次检查点开始的LSN
+	checkPoint.redo = curInsert;
+
+	RedoRecPtr = XLogCtl->Insert.RedoRecPtr = checkPoint.redo;
+	WALInsertLockRelease();
+
+	// 更新RedoRecPtr
+	SpinLockAcquire(&XLogCtl->info_lck);
+	XLogCtl->RedoRecPtr = checkPoint.redo;
+	SpinLockRelease(&XLogCtl->info_lck);
+
+	// ...
+
+	// 将脏页刷盘，以及其他需要落盘的数据
+	CheckPointGuts(checkPoint.redo, flags);
+
+	// ...
+
+	// 更新pg_control文件
+	UpdateControlFile();
+
+	// ...
+
+	// 获得清理位置，删除无用的日志文件
+	/*
+	 * Delete old log files, those no longer needed for last checkpoint to
+	 * prevent the disk holding the xlog from growing full.
+	 */
+	XLByteToSeg(RedoRecPtr, _logSegNo, wal_segment_size);
+	KeepLogSeg(recptr, &_logSegNo);
+	if (InvalidateObsoleteReplicationSlots(_logSegNo))
+	{
+		XLByteToSeg(RedoRecPtr, _logSegNo, wal_segment_size);
+		KeepLogSeg(recptr, &_logSegNo);
+	}
+	_logSegNo--;
+	RemoveOldXlogFiles(_logSegNo, RedoRecPtr, recptr);
+
+	// ...
+}
+
+/* Flush all data in shared memory to disk, and fsync */
+static void CheckPointGuts(XLogRecPtr checkPointRedo, int flags)
+{
+	CheckPointRelationMap();		// 保障在检查点开始之前所有Relation Map都已经被刷盘
+	CheckPointReplicationSlots();	// 把日志复制使用的Slot信息刷入磁盘
+	CheckPointSnapBuild();			// 移除无用的快照信息
+	CheckPointLogicalRewriteHeap();
+	CheckPointReplicationOrigin();
+
+	/* Write out all dirty data in SLRUs and the main buffer pool */
+	TRACE_POSTGRESQL_BUFFER_CHECKPOINT_START(flags);
+	CheckpointStats.ckpt_write_t = GetCurrentTimestamp();
+	CheckPointCLOG();			// 刷新事务提交日志
+	CheckPointCommitTs();
+	CheckPointSUBTRANS();		// 刷新子事务日志
+	CheckPointMultiXact();		// 刷新元组的事务状态日志信息
+	CheckPointPredicate();
+	CheckPointBuffers(flags);	// 刷入主缓冲区中的脏页
+
+	/* Perform all queued up fsyncs */
+	TRACE_POSTGRESQL_BUFFER_CHECKPOINT_SYNC_START();
+	CheckpointStats.ckpt_sync_t = GetCurrentTimestamp();
+	ProcessSyncRequests();
+	CheckpointStats.ckpt_sync_end_t = GetCurrentTimestamp();
+	TRACE_POSTGRESQL_BUFFER_CHECKPOINT_DONE();
+
+	/* We deliberately delay 2PC checkpointing as long as possible */
+	CheckPointTwoPhase(checkPointRedo);
+}
+```
+我们看一下Checkpoint最重要的一个任务，将脏页刷盘：
+```c++
+/* Flush all dirty blocks in buffer pool to disk at checkpoint time. */
+void CheckPointBuffers(int flags)
+{
+	BufferSync(flags);
+}
+```
+
+
 
 
 
