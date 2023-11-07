@@ -65,7 +65,8 @@ database study, include PostgreSQL, distribute system  and so on.
 - [Postgres源码分析——CHECKPOINT](./postgres/pg-src-analyze-checkpoint.md)
 - [Postgres源码分析——基础备份](./postgres/pg-src-analyze-basebackup.md)
 - [Postgres源码分析——日志归档](./postgres/pg-src-analyze-archiver.md)
-
+- [Postgres源码分析——WAL日志（一）](./postgres/pg-src-analyze-wal-part1.md)
+- [Postgres源码分析——WAL日志（二）](./postgres/pg-src-analyze-wal-part2.md)
 #### 源码分析 —— 后台进程
 - [Postgres源码分析——bgwriter](./postgres/pg-src-analyze-bgwriter.md)
 - [Postgres源码分析——启动流程](./postgres/pg-src-analyze-start.md)
