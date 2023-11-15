@@ -384,6 +384,9 @@ CheckpointerMain()
 	--> RemoveOldXlogFiles(_logSegNo, RedoRecPtr, recptr);
 ```
 其中一个很重要的点是记录本次检查点信息，检查点会把本次检查点开始时的日志插入点`Insert->CurrBytePos`记录到`RedoRecPtr`变量中，这样在数据库故障恢复时，就可以以此为起点进行恢复。为啥是这个位置呢？在此之前的WAL日志，对应的Buffer中的脏页需要全部刷盘，也就是说，在此位置之前的WAL日志是不需要进行回放的，因为页已经落盘了。崩溃恢复的起点，也就是Redo位置，是从这个位置开始，Buffer中没有落盘的开始的位置，因为在执行Checkpoint的过程中，数据库依旧在运行，业务仍然在不断产生WAL日志，以及Buffer中会缓存脏页，这部分并没有进行落盘，所以当数据库发生崩溃恢复时，如果从Redo之前的位置开始回放，则因为页已经持久化了，无须进行回放，所以，回放的起点就是Redo的位置。这篇博文有图片解释，可能会生动一些，可参考[Postgresql Checkpoint 原理](https://zhmin.github.io/posts/postgresql-checkpoint/)
+
+>关于重做点，重做点其实就是当前WAL日志的插入点，或者说当前WAL日志记录的终点位置，从这个位置开始，之前的所有WAL日志对应的脏页刷盘，然后清理WAL日志，在进行checkpoint的过程中，其实业务是不停的，还会继续源源不断的产生WAL日志，后续产生的WAL日志就是从重做点开始的，而这部分WAL日志对于的脏页并没有被刷盘，所以崩溃恢复时，需要从这个重做点开始进行回放。
+
 ```c++
 void CreateCheckPoint(int flags)
 {
