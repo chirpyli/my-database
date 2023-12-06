@@ -21,7 +21,8 @@ main(int argc, char **argv)
 --> BaseBackup();      // 执行基础备份
     --> GenerateRecoveryConfig(conn, replication_slot);   // 用于生成primary_conninfo配置信息
         --> PQconninfo(pgconn);
-    --> RunIdentifySystem(conn, &sysidentifier, &latesttli, NULL, NULL)
+        // 向服务端发送IDENTIFY_SYSTEM命令，返回timeline和system identifier. 
+    --> RunIdentifySystem(conn, &sysidentifier, &latesttli, NULL, NULL) 
 
     basebkp = psprintf("BASE_BACKUP LABEL '%s' %s %s %s %s %s %s %s %s %s",
 				 escaped_label,
