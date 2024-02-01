@@ -20,6 +20,8 @@ database study, include PostgreSQL, distribute system  and so on.
 
 ### PostgreSQL
 
+
+
 #### 源码分析——DML
 
 
@@ -72,8 +74,17 @@ database study, include PostgreSQL, distribute system  and so on.
 - [Postgres源码分析——bgwriter](./postgres/pg-src-analyze-bgwriter.md)
 - [Postgres源码分析——启动流程](./postgres/pg-src-analyze-start.md)
 
+
+#### 源码分析 —— DCL
+- [Postgres源码分析——创建用户](./postgres/pg-src-analyze-create-user.md)
+- [Postgres源码分析——口令认证](./postgres/pg-src-analyze-auth.md)
+
+#### 源码分析 —— 工具
 - [Postgres源码分析——pg_basebackup](./postgres/pg-src-analyze-pg_basebackup.md)
 - [Postgres源码分析——initdb](./postgres/pg-src-analyze-initdb.md)
+- [Postgres源码分析——psql](./postgres/pg-src-analyze-psql.md)
+
+
 ### greenplum
 - [Greenplum执行计划分析](./greenplum/gp-plan-analyze.md)
 - [Greenplum源码分析——简单查询SELECT](./greenplum/gp-src-analyze-select.md)
