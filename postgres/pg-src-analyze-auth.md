@@ -428,3 +428,5 @@ int CheckSASLAuth(const pg_be_sasl_mech *mech, Port *port, char *shadow_pass, co
 
 ```
 
+参考文档：
+[PostgreSQL中的密码验证方法](https://zhuanlan.zhihu.com/p/650862248)

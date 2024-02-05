@@ -776,5 +776,111 @@ ObjectAddress DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId, Object
 }
 ```
 
+#### 创建表的物理文件
+数据库中的数据最终是要持久化的，创建一个表，实际上就是创建一个文件，在这个文件中存储元组信息。我们创建了一个`t1`的表，然后查看一下表的存储路径，其文件名即为表oid，表文件被切分为若干segment，每个segment不超过1G，segment又被切分为8k的块，元组存储在块Block中。
+```c++
+postgres=# create table t1(a int);
+CREATE TABLE
+postgres=# select pg_relation_filepath('t1');
+ pg_relation_filepath 
+----------------------
+ base/5/16431
+(1 row)
+```
+
+建表的过程伴随着物理表文件的创建，我们看一下源码调用栈，在`RelationCreateStorage`函数中创建具体的物理表文件在磁盘上。
+```c++
+RelationCreateStorage(RelFileNode rnode, char relpersistence, _Bool register_delete) (src\backend\catalog\storage.c:127)
+heapam_relation_set_new_filenode(Relation rel, const RelFileNode * newrnode, char persistence, TransactionId * freezeXid, MultiXactId * minmulti) (src\backend\access\heap\heapam_handler.c:594)
+table_relation_set_new_filenode(Relation rel, const RelFileNode * newrnode, char persistence, TransactionId * freezeXid, MultiXactId * minmulti) (src\include\access\tableam.h:1598)
+heap_create(const char * relname, Oid relnamespace, Oid reltablespace, Oid relid, Oid relfilenode, Oid accessmtd, TupleDesc tupDesc, char relkind, char relpersistence, _Bool shared_relation, _Bool mapped_relation, _Bool allow_system_table_mods, TransactionId * relfrozenxid, MultiXactId * relminmxid, _Bool create_storage) (src\backend\catalog\heap.c:388)
+heap_create_with_catalog(const char * relname, Oid relnamespace, Oid reltablespace, Oid relid, Oid reltypeid, Oid reloftypeid, Oid ownerid, Oid accessmtd, TupleDesc tupdesc, List * cooked_constraints, char relkind, char relpersistence, _Bool shared_relation, _Bool mapped_relation, OnCommitAction oncommit, Datum reloptions, _Bool use_user_acl, _Bool allow_system_table_mods, _Bool is_internal, Oid relrewrite, ObjectAddress * typaddress) (src\backend\catalog\heap.c:1275)
+DefineRelation(CreateStmt * stmt, char relkind, Oid ownerId, ObjectAddress * typaddress, const char * queryString) (src\backend\commands\tablecmds.c:963)
+ProcessUtilitySlow(ParseState * pstate, PlannedStmt * pstmt, const char * queryString, ProcessUtilityContext context, ParamListInfo params, QueryEnvironment * queryEnv, DestReceiver * dest, QueryCompletion * qc) (src\backend\tcop\utility.c:1171)
+standard_ProcessUtility(PlannedStmt * pstmt, const char * queryString, _Bool readOnlyTree, ProcessUtilityContext context, ParamListInfo params, QueryEnvironment * queryEnv, DestReceiver * dest, QueryCompletion * qc) (src\backend\tcop\utility.c:1074)
+ProcessUtility(PlannedStmt * pstmt, const char * queryString, _Bool readOnlyTree, ProcessUtilityContext context, ParamListInfo params, QueryEnvironment * queryEnv, DestReceiver * dest, QueryCompletion * qc) (src\backend\tcop\utility.c:530)
+PortalRunUtility(Portal portal, PlannedStmt * pstmt, _Bool isTopLevel, _Bool setHoldSnapshot, DestReceiver * dest, QueryCompletion * qc) (src\backend\tcop\pquery.c:1158)
+PortalRunMulti(Portal portal, _Bool isTopLevel, _Bool setHoldSnapshot, DestReceiver * dest, DestReceiver * altdest, QueryCompletion * qc) (src\backend\tcop\pquery.c:1315)
+PortalRun(Portal portal, long count, _Bool isTopLevel, _Bool run_once, DestReceiver * dest, DestReceiver * altdest, QueryCompletion * qc) (src\backend\tcop\pquery.c:791)
+exec_simple_query(const char * query_string) (src\backend\tcop\postgres.c:1250)
+PostgresMain(const char * dbname, const char * username) (src\backend\tcop\postgres.c:4598)
+BackendRun(Port * port) (src\backend\postmaster\postmaster.c:4514)
+BackendStartup(Port * port) (src\backend\postmaster\postmaster.c:4242)
+ServerLoop() (src\backend\postmaster\postmaster.c:1809)
+PostmasterMain(int argc, char ** argv) (src\backend\postmaster\postmaster.c:1481)
+main(int argc, char ** argv) (src\backend\main\main.c:202)
+```
+
+我们看一下函数`RelationCreateStorage`实现：
+```c++
+/*
+ * RelationCreateStorage
+ *		Create physical storage for a relation.
+ *
+ * Create the underlying disk file storage for the relation. This only
+ * creates the main fork; additional forks are created lazily by the
+ * modules that need them.
+ *
+ * This function is transactional. The creation is WAL-logged, and if the
+ * transaction aborts later on, the storage will be destroyed.  A caller
+ * that does not want the storage to be destroyed in case of an abort may
+ * pass register_delete = false.
+ */
+SMgrRelation RelationCreateStorage(RelFileNode rnode, char relpersistence, bool register_delete)
+{
+	SMgrRelation srel;
+	BackendId	backend;
+	bool		needs_wal;
+
+	switch (relpersistence)
+	{
+		case RELPERSISTENCE_TEMP:
+			backend = BackendIdForTempRelations();
+			needs_wal = false;
+			break;
+		case RELPERSISTENCE_UNLOGGED:
+			backend = InvalidBackendId;
+			needs_wal = false;
+			break;
+		case RELPERSISTENCE_PERMANENT:
+			backend = InvalidBackendId;
+			needs_wal = true;
+			break;
+		default:
+			elog(ERROR, "invalid relpersistence: %c", relpersistence);
+			return NULL;		/* placate compiler */
+	}
+
+	srel = smgropen(rnode, backend);
+	smgrcreate(srel, MAIN_FORKNUM, false);
+
+	if (needs_wal)
+		log_smgrcreate(&srel->smgr_rnode.node, MAIN_FORKNUM);
+
+	/* Add the relation to the list of stuff to delete at abort, if we are asked to do so. */
+	if (register_delete)
+	{
+		PendingRelDelete *pending;
+
+		pending = (PendingRelDelete *) MemoryContextAlloc(TopMemoryContext, sizeof(PendingRelDelete));
+		pending->relnode = rnode;
+		pending->backend = backend;
+		pending->atCommit = false;	/* delete if abort */
+		pending->nestLevel = GetCurrentTransactionNestLevel();
+		pending->next = pendingDeletes;
+		pendingDeletes = pending;
+	}
+
+	if (relpersistence == RELPERSISTENCE_PERMANENT && !XLogIsNeeded())
+	{
+		Assert(backend == InvalidBackendId);
+		AddPendingSync(&rnode);
+	}
+
+	return srel;
+}
+```
+
+
 #### 后记
 对分区表的理解，创建分区表仅仅是第一步，对分区表相关的优化才是重点，想一想，为什么会出现分区表，也是为了对相关场景的优化才出来的。所以，对分区表优化部分的理解十分重要，对应用端应用分区表并对相关场景进行优化也十分有益。
