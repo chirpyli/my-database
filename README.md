@@ -20,7 +20,8 @@ database study, include PostgreSQL, distribute system  and so on.
 
 ### PostgreSQL
 
-
+- [PostgreSQL源码分析——数据页校验](./postgres/pg-src-analyze-checksum.md)
+- [PostgreSQL源码分析——外存管理](./postgres/pg-src-analyze-smgr.md)
 
 #### 源码分析——DML
 
