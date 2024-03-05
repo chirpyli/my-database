@@ -238,6 +238,90 @@ wal_005/
 ```
 每次恢复数据库，其时间线都会加1。 时间线用于区分原始数据库和恢复生成的数据库集簇，是PITR的核心概念。
 
+
+#### 增量备份
+设置环境变量
+```bash
+export WALG_DELTA_ORIGIN=LATEST_FULL
+```
+执行增量备份
+```shell
+postgres@slpc:~$ wal-g backup-push $PGDATA --delta-from-name base_000000020000000000000024
+INFO: 2024/03/05 16:33:02.689154 Backup will be pushed to storage: default
+INFO: 2024/03/05 16:33:02.698428 Selecting the backup with name base_000000020000000000000024 as the base for the current delta backup...
+INFO: 2024/03/05 16:33:02.956011 Delta will be made from full backup.
+INFO: 2024/03/05 16:33:02.968992 Delta backup from base_000000020000000000000024 with LSN 0/24000028.
+INFO: 2024/03/05 16:33:03.075391 Calling pg_start_backup()
+INFO: 2024/03/05 16:33:03.093341 Initializing the PG alive checker (interval=1m0s)...
+INFO: 2024/03/05 16:33:03.093443 Delta backup enabled
+INFO: 2024/03/05 16:33:03.093481 Starting a new tar bundle
+INFO: 2024/03/05 16:33:03.093510 Walking ...
+INFO: 2024/03/05 16:33:03.094918 Starting part 1 ...
+INFO: 2024/03/05 16:33:03.128718 Packing ...
+INFO: 2024/03/05 16:33:03.129758 Finished writing part 1.
+INFO: 2024/03/05 16:33:03.163413 Starting part 2 ...
+INFO: 2024/03/05 16:33:03.164104 /global/pg_control
+INFO: 2024/03/05 16:33:03.176944 Finished writing part 2.
+INFO: 2024/03/05 16:33:03.176973 Calling pg_stop_backup()
+INFO: 2024/03/05 16:33:03.226442 Starting part 3 ...
+INFO: 2024/03/05 16:33:03.227771 backup_label
+INFO: 2024/03/05 16:33:03.227807 tablespace_map
+INFO: 2024/03/05 16:33:03.233816 Finished writing part 3.
+INFO: 2024/03/05 16:33:03.250012 Querying pg_database
+INFO: 2024/03/05 16:33:03.553529 Wrote backup with name base_000000020000000000000029_D_000000020000000000000024 to storage default
+```
+查看备份文件
+```shell
+postgres@slpc:~$ wal-g st ls basebackups_005
+type size last modified                     name
+dir  0    0001-01-01 00:00:00 +0000 UTC     base_000000020000000000000024/
+dir  0    0001-01-01 00:00:00 +0000 UTC     base_000000020000000000000029_D_000000020000000000000024/
+obj  398  2024-03-05 06:55:53.786 +0000 UTC base_000000020000000000000024_backup_stop_sentinel.json
+obj  522  2024-03-05 08:33:03.501 +0000 UTC base_000000020000000000000029_D_000000020000000000000024_backup_stop_sentinel.json
+```
+再次执行备份
+```bash
+postgres@slpc:~$ wal-g backup-push $PGDATA --delta-from-name base_000000020000000000000029_D_000000020000000000000024
+INFO: 2024/03/05 16:49:52.073832 Backup will be pushed to storage: default
+INFO: 2024/03/05 16:49:52.073934 Selecting the backup with name base_000000020000000000000029_D_000000020000000000000024 as the base for the current delta backup...
+INFO: 2024/03/05 16:49:52.349094 Delta will be made from full backup.
+INFO: 2024/03/05 16:49:52.362781 Delta backup from base_000000020000000000000024 with LSN 0/24000028.
+INFO: 2024/03/05 16:49:52.443188 Calling pg_start_backup()
+INFO: 2024/03/05 16:49:52.547250 Initializing the PG alive checker (interval=1m0s)...
+INFO: 2024/03/05 16:49:52.547356 Delta backup enabled
+INFO: 2024/03/05 16:49:52.547394 Starting a new tar bundle
+INFO: 2024/03/05 16:49:52.547448 Walking ...
+INFO: 2024/03/05 16:49:52.547831 Starting part 1 ...
+INFO: 2024/03/05 16:49:52.585035 Packing ...
+INFO: 2024/03/05 16:49:52.588192 Finished writing part 1.
+INFO: 2024/03/05 16:49:52.631401 Starting part 2 ...
+INFO: 2024/03/05 16:49:52.641163 /global/pg_control
+INFO: 2024/03/05 16:49:52.650529 Finished writing part 2.
+INFO: 2024/03/05 16:49:52.650607 Calling pg_stop_backup()
+INFO: 2024/03/05 16:49:52.694601 Starting part 3 ...
+INFO: 2024/03/05 16:49:52.697699 backup_label
+INFO: 2024/03/05 16:49:52.697793 tablespace_map
+INFO: 2024/03/05 16:49:53.183120 Finished writing part 3.
+INFO: 2024/03/05 16:49:53.341786 Querying pg_database
+INFO: 2024/03/05 16:49:53.730008 Wrote backup with name base_00000002000000000000002C_D_000000020000000000000024 to storage default
+postgres@slpc:~$ wal-g st ls basebackups_005
+type size last modified                     name
+dir  0    0001-01-01 00:00:00 +0000 UTC     base_000000020000000000000024/
+dir  0    0001-01-01 00:00:00 +0000 UTC     base_000000020000000000000029_D_000000020000000000000024/
+dir  0    0001-01-01 00:00:00 +0000 UTC     base_00000002000000000000002C_D_000000020000000000000024/
+obj  398  2024-03-05 06:55:53.786 +0000 UTC base_000000020000000000000024_backup_stop_sentinel.json
+obj  522  2024-03-05 08:33:03.501 +0000 UTC base_000000020000000000000029_D_000000020000000000000024_backup_stop_sentinel.json
+obj  522  2024-03-05 08:49:53.712 +0000 UTC base_00000002000000000000002C_D_000000020000000000000024_backup_stop_sentinel.json
+postgres@slpc:~$ wal-g backup-list
+INFO: 2024/03/05 16:59:06.308660 List backups from storages: [default]
+backup_name                                              modified             wal_file_name            storage_name
+base_000000020000000000000024                            2024-03-05T06:55:53Z 000000020000000000000024 default
+base_000000020000000000000029_D_000000020000000000000024 2024-03-05T08:33:03Z 000000020000000000000029 default
+base_00000002000000000000002C_D_000000020000000000000024 2024-03-05T08:49:53Z 00000002000000000000002C default
+
+```
+
+
 ### 存储
 wal-g可备份到S3、Google Cloud Storage、Azure、Swift、远端主机、本地盘
 
