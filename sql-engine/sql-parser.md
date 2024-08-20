@@ -188,7 +188,7 @@ if_stmt: IF expr THEN stmt
 
 
 #### 遇到shift/reduce conflict怎么办？
-遇到这个，首先是定位哪里出现的冲突，可通过bison -v（生成.out日志文件） 查看（gram.y）生成的gram.out 从这里去定位问题发生在哪里，然后解决。
+遇到这个，首先是定位哪里出现的冲突，可通过`bison -v`（生成.out日志文件） 查看（gram.y）生成的gram.out 从这里去定位问题发生在哪里，然后解决。
 
 #### 查询分析模块调试
 打印bison语法分析过程：
