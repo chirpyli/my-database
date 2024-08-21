@@ -91,7 +91,7 @@ postgres=# select * from pg_buffercache where relfilenode = 16385;
 ```
 
 ### pg_buffercache插件的源码分析
-pg_buffercache的主要思路就是遍历buffer cache，将每个缓存的页的相关信息(relfilenode、reltablespace、reldatabase、relforknumber、relblocknumber、isdirty、usagecount、pinning_backends)提取出来，然后返回给用户。提取信息的思路也比较容易理解，就是通过buffer_id通过buffer_id找到对应的Buffer，然后从Buffer中提取信息即可。
+pg_buffercache的主要思路就是遍历buffer cache，将每个缓存的页的相关信息(relfilenode、reltablespace、reldatabase、relforknumber、relblocknumber、isdirty、usagecount、pinning_backends)提取出来，然后返回给用户。提取信息的思路也比较容易理解，就是通过buffer_id找到对应的Buffer，然后从Buffer中提取信息即可。
 
 
 具体实现上就是主要代码为增加了一个函数`pg_buffercache_pages`以及一个视图`pg_buffercache`。
@@ -110,7 +110,7 @@ CREATE VIEW pg_buffercache AS
 	 relforknumber int2, relblocknumber int8, isdirty bool, usagecount int2,
 	 pinning_backends int4);
 ```
-其中`pg_buffercache_pages`函数会遍历Buffer Cache，将每个Buffer的信息存储在一个自定义的Buffer中，然后返回该Buffer中的数据。
+其中`pg_buffercache_pages`函数会遍历Buffer Cache，提取信息。
 
 用户使用时，会查询视图`pg_buffercache`，调用栈如下：
 ```c++
