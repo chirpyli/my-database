@@ -451,7 +451,7 @@ write_syslogger_file(const char *buffer, int count, int destination)
 ```
 
 ### elog源码分析
-这部分的代码主要再elog.h、elog.c中。定义了日志级别，日志打印的函数定义，日志项的定义。 这里是日志的写端，logger进程是日志的读端，读后写入日志文件中。
+这部分的代码主要在elog.h、elog.c中。定义了日志级别，日志打印的函数定义，日志项的定义。 这里是日志的写端，logger进程是日志的读端，读后写入日志文件中。
 
 在各进程需要打印日志时，调用`ereport`，定义如下：
 ```c++

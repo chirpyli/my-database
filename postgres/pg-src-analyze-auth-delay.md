@@ -56,7 +56,6 @@ void ClientAuthentication(Port *port)
 
 	hba_getauthmethod(port);
 
-
 	/*
 	 * This is the first point where we have access to the hba record for the
 	 * current connection, so perform any verifications based on the hba
@@ -97,10 +96,7 @@ void ClientAuthentication(Port *port)
 
 	if ((status == STATUS_OK && port->hba->clientcert == clientCertFull)|| port->hba->auth_method == uaCert)
 	{
-		/*
-		 * Make sure we only check the certificate if we use the cert method
-		 * or verify-full option.
-		 */
+		/* Make sure we only check the certificate if we use the cert method or verify-full option.*/
 #ifdef USE_SSL
 		status = CheckCertAuth(port);
 #else
@@ -129,33 +125,19 @@ static int	auth_delay_milliseconds;
 /* Original Hook */
 static ClientAuthentication_hook_type original_client_auth_hook = NULL;
 
-/*
- * Check authentication
- */
-static void
-auth_delay_checks(Port *port, int status)
+/* Check authentication */
+static void auth_delay_checks(Port *port, int status)
 {
-	/*
-	 * Any other plugins which use ClientAuthentication_hook.
-	 */
+	/* Any other plugins which use ClientAuthentication_hook. */
 	if (original_client_auth_hook)
 		original_client_auth_hook(port, status);
 
-	/*
-	 * Inject a short delay if authentication failed.
-	 */
     // 认证失败的时候，进行延时，防止暴力破解
 	if (status != STATUS_OK)
-	{
 		pg_usleep(1000L * auth_delay_milliseconds);
-	}
 }
 
-/*
- * Module Load Callback
- */
-void
-_PG_init(void)
+void _PG_init(void)
 {
 	/* Define custom GUC variables */
 	DefineCustomIntVariable("auth_delay.milliseconds",
@@ -166,9 +148,7 @@ _PG_init(void)
 							0, INT_MAX / 1000,
 							PGC_SIGHUP,
 							GUC_UNIT_MS,
-							NULL,
-							NULL,
-							NULL);
+							NULL,NULL,NULL);
 	/* Install Hooks */
 	original_client_auth_hook = ClientAuthentication_hook;
 	ClientAuthentication_hook = auth_delay_checks;
