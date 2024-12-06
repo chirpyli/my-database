@@ -596,26 +596,11 @@ static void heapgettup_pagemode(HeapScanDesc scan, ScanDirection dir, int nkeys,
 			finished = (page == scan->rs_startblock) ||
 				(scan->rs_numblocks != InvalidBlockNumber ? --scan->rs_numblocks == 0 : false);
 
-			/*
-			 * Report our new scan position for synchronization purposes. We
-			 * don't do that when moving backwards, however. That would just
-			 * mess up any other forward-moving scanners.
-			 *
-			 * Note: we do this before checking for end of scan so that the
-			 * final state of the position hint is back at the start of the
-			 * rel.  That's not strictly necessary, but otherwise when you run
-			 * the same query multiple times the starting position would shift
-			 * a little bit backwards on every invocation, which is confusing.
-			 * We don't guarantee any specific ordering in general, though.
-			 */
-			if (scan->rs_base.rs_flags & SO_ALLOW_SYNC)
+			if (scan->rs_base.rs_flags & SO_ALLOW_SYNC)		// 如果允许同步，则报告当前扫描位置
 				ss_report_location(scan->rs_base.rs_rd, page);
 		}
 
-		/*
-		 * return NULL if we've exhausted all the pages
-		 */
-		if (finished)
+		if (finished)		// 如果已经扫描完所有页，则返回 NULL
 		{
 			if (BufferIsValid(scan->rs_cbuf))
 				ReleaseBuffer(scan->rs_cbuf);
@@ -626,39 +611,20 @@ static void heapgettup_pagemode(HeapScanDesc scan, ScanDirection dir, int nkeys,
 			return;
 		}
 
-		heapgetpage((TableScanDesc) scan, page);
+		heapgetpage((TableScanDesc) scan, page);	// 获取下一个页
 
 		dp = BufferGetPage(scan->rs_cbuf);
 		TestForOldSnapshot(scan->rs_base.rs_snapshot, scan->rs_base.rs_rd, dp);
 		lines = scan->rs_ntuples;
-		linesleft = lines;
+		linesleft = lines;			// 获取当前页中剩余的元组数量
 		if (backward)
-			lineindex = lines - 1;
+			lineindex = lines - 1;	// 反向扫描，从最后一个元组开始
 		else
-			lineindex = 0;
+			lineindex = 0;			// 正向扫描，从第一个元组开始
 	}
 }
 
 ```
 
-
-
-
-更详细的代码要阅读`heapam.c`中的实现。
-```c++
-/*
- * IDENTIFICATION
- *	  src/backend/access/heap/heapam.c
- *
- * INTERFACE ROUTINES
- *		heap_beginscan	- begin relation scan
- *		heap_rescan		- restart a relation scan
- *		heap_endscan	- end relation scan
- *		heap_getnext	- retrieve next tuple in scan
- *		heap_fetch		- retrieve tuple with given tid
- *		heap_insert		- insert tuple into a relation
- *		heap_multi_insert - insert multiple tuples into a relation
- *		heap_delete		- delete a tuple from a relation
- *		heap_update		- replace a tuple in a relation with another tuple
- */
-```
+#### 总结
+对全表扫描的过程，就是首先生成顺序扫描执行计划，给执行器的核心信息是我要扫描的表的OID，以及扫描方式为顺序扫描。执行器执行顺序扫描算子，一次一元组执行，在正式开始扫描前，需要通过OID打开将要扫描的表，计算表的总页数，在开始扫描后，从第一个页开始扫描，从Buffer中获取指定页，如果Buffer中没有指定块号的页，则从文件中读取一个页到Buffer中，从Buffer读取一个页后，需要判断页中元组的可见性，一次性将页中所有可见元组读取放入scan->rs_vistuples中，遍历页中的所有元组，当页中的所有元组遍历完后，再读取下一个页，直到所有页读取完。
