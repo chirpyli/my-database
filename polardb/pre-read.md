@@ -13,6 +13,7 @@ ing_backends
 (0 rows)
 ```
 读取第一个元组需要读第一个页到Buffer中，此时，Buffer中会有表t1的缓存页1个。
+```sql
 postgres=# select * from pg_buffercache where relfilenode=16384;
  bufferid | relfilenode | reltablespace | reldatabase | relforknumber | relblocknumber | isdirty | usagecount | pinn
 ing_backends 
@@ -21,7 +22,7 @@ ing_backends
       308 |       16384 |          1663 |       13010 |             0 |              0 | f       |          1 |     
            1
 (1 row)
-
+```
 当读取完第一个页面的所有元组后，需要读第二个页，从文件中读取页到Buffer中，此时，Buffer中会有表t1的缓存页2个。
 ```sql
 postgres=# select * from pg_buffercache where relfilenode=16384;

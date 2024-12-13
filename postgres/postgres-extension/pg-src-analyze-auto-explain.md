@@ -2,7 +2,7 @@
 
 auto_explain是PostgreSQL的一个插件，用于自动记录执行时间超过指定阈值的查询的执行计划。这个功能对于优化查询性能非常有用，因为它可以帮助开发人员了解哪些查询是性能瓶颈，从而进行相应的优化。
 
-auto_explain的实现非常简单，它通过在执行查询之前和之后记录一些关键信息，然后比较这些信息来判断查询是否超过了指定的阈值。如果超过了阈值，auto_explain就会记录查询的执行计划，并将其输出到日志文件中。
+auto_explain的实现非常简单，它通过在执行查询之前和之后记录一些关键信息，然后比较这些信息（时间信息）来判断查询是否超过了指定的阈值。如果超过了阈值，auto_explain就会记录查询的执行计划，并将其输出到日志文件中。
 
 
 ### 插件的使用
@@ -24,7 +24,8 @@ auto_explain.log_analyze = true # 记录查询的分析计划
 - auto_explain.log_nested_statements：指定是否记录嵌套查询的执行计划。
 - auto_explain.log_timing：指定是否记录查询的执行时间。
 - auto_explain.log_verbose：指定是否记录查询的详细信息，例如查询的输入和输出行数等。
-更多可查看[auto_explain中文文档](http://postgres.cn/docs/15/auto-explain.html)
+
+>更多可查看[auto_explain中文文档](http://postgres.cn/docs/15/auto-explain.html)
 
 示例：
 ```sql
@@ -46,8 +47,7 @@ postgres=# select * from t1;        -- 查询日志
 ### 实现思路
 具体实现上，关键是记录运行时间，需要在执行前后进行记录，即在ExecutorRun中，添加相应的代码，如果执行的时间超过GUC参数设置的阈值则根据执行器的执行计划节点输出执行计划
 ```c++
-void
-standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, uint64 count, bool execute_once)
+void standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, uint64 count, bool execute_once)
 {
 
 	/* Allow instrumentation of Executor overall runtime */
@@ -60,15 +60,10 @@ standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, uint64 count
 			elog(ERROR, "can't re-execute query flagged for single execution");
 		queryDesc->already_executed = true;
         // 节点的实际执行
-		ExecutePlan(estate,
-					queryDesc->planstate,
+		ExecutePlan(estate, queryDesc->planstate,
 					queryDesc->plannedstmt->parallelModeNeeded,
-					operation,
-					sendTuples,
-					count,
-					direction,
-					dest,
-					execute_once);
+					operation, sendTuples, count,
+					direction, dest, execute_once);
 	}
 
     // 记录运行结束的时间，计算执行的耗时，当然，不只是时间，还计算所用的buffer、wal等情况
@@ -126,12 +121,10 @@ void InstrStopNode(Instrumentation *instr, double nTuples)
 
 	/* Add delta of buffer usage since entry to node's totals */
 	if (instr->need_bufusage)
-		BufferUsageAccumDiff(&instr->bufusage,
-							 &pgBufferUsage, &instr->bufusage_start);
+		BufferUsageAccumDiff(&instr->bufusage, &pgBufferUsage, &instr->bufusage_start);
 
 	if (instr->need_walusage)
-		WalUsageAccumDiff(&instr->walusage,
-						  &pgWalUsage, &instr->walusage_start);
+		WalUsageAccumDiff(&instr->walusage, &pgWalUsage, &instr->walusage_start);
 
 	/* Is this the first tuple of this cycle? */
 	if (!instr->running)
@@ -195,9 +188,7 @@ void		_PG_fini(void);
 
 // 钩子函数实现auto explain
 static void explain_ExecutorStart(QueryDesc *queryDesc, int eflags);
-static void explain_ExecutorRun(QueryDesc *queryDesc,
-								ScanDirection direction,
-								uint64 count, bool execute_once);
+static void explain_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, uint64 count, bool execute_once);
 static void explain_ExecutorFinish(QueryDesc *queryDesc);
 static void explain_ExecutorEnd(QueryDesc *queryDesc);
 
@@ -380,9 +371,7 @@ static void explain_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, u
 	PG_END_TRY();
 }
 
-/*
- * ExecutorFinish hook: all we need do is track nesting depth
- */
+/* ExecutorFinish hook: all we need do is track nesting depth */
 static void explain_ExecutorFinish(QueryDesc *queryDesc)
 {
 	nesting_level++;
@@ -414,10 +403,7 @@ static void explain_ExecutorEnd(QueryDesc *queryDesc)
 		 */
 		oldcxt = MemoryContextSwitchTo(queryDesc->estate->es_query_cxt);
 
-		/*
-		 * Make sure stats accumulation is done.  (Note: it's okay if several
-		 * levels of hook all do this.)
-		 */
+		/* Make sure stats accumulation is done.   */
 		InstrEndLoop(queryDesc->totaltime);
 
 		/* Log plan if duration is exceeded. */
@@ -455,16 +441,11 @@ static void explain_ExecutorEnd(QueryDesc *queryDesc)
 				es->str->data[es->str->len - 1] = '}';
 			}
 
-			/*
-			 * Note: we rely on the existing logging of context or
+			/* Note: we rely on the existing logging of context or
 			 * debug_query_string to identify just which statement is being
 			 * reported.  This isn't ideal but trying to do it here would
-			 * often result in duplication.
-			 */
-			ereport(auto_explain_log_level,
-					(errmsg("duration: %.3f ms  plan:\n%s",
-							msec, es->str->data),
-					 errhidestmt(true)));
+			 * often result in duplication. */
+			ereport(auto_explain_log_level,(errmsg("duration: %.3f ms  plan:\n%s",msec, es->str->data), errhidestmt(true)));
 		}
 
 		MemoryContextSwitchTo(oldcxt);
