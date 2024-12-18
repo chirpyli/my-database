@@ -1,0 +1,1185 @@
+From f8f7c12446a06d8b230a1cf5deb2ea61b0e25d59 Mon Sep 17 00:00:00 2001
+From: MuYuLinZhong <realitylinxuan@163.com>
+Date: Mon, 18 Dec 2023 17:28:59 +0800
+Subject: [PATCH] 需求：堆表支持预读
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ .../backend/utils/misc/guc/guc_storage.cpp    |  62 ++++
+ .../optimizer/commands/vacuumlazy.cpp         |  12 +-
+ .../process/threadpool/knl_session.cpp        |  13 +
+ .../storage/access/heap/heapam.cpp            |  18 +-
+ src/gausskernel/storage/buffer/bufmgr.cpp     | 311 +++++++++++++++++-
+ src/gausskernel/storage/buffer/localbuf.cpp   |  12 +
+ src/gausskernel/storage/smgr/md.cpp           |  46 +++
+ src/gausskernel/storage/smgr/smgr.cpp         |  10 +
+ src/include/access/relscan.h                  |   2 +
+ .../knl/knl_guc/knl_instance_attr_storage.h   |   2 +
+ .../knl/knl_guc/knl_session_attr_storage.h    |   3 +
+ src/include/knl/knl_session.h                 |  23 ++
+ src/include/storage/buf/bufmgr.h              |   4 +
+ src/include/storage/smgr/smgr.h               |   2 +
+ src/include/utils/guc.h                       |   2 +
+ src/test/regress/expected/preread_test.out    | 212 ++++++++++++
+ src/test/regress/parallel_schedule0A          |   3 +
+ src/test/regress/sql/preread_test.sql         |  99 ++++++
+ 18 files changed, 829 insertions(+), 7 deletions(-)
+ create mode 100644 src/test/regress/expected/preread_test.out
+ create mode 100644 src/test/regress/sql/preread_test.sql
+
+diff --git a/src/common/backend/utils/misc/guc/guc_storage.cpp b/src/common/backend/utils/misc/guc/guc_storage.cpp
+index a760033bc..603902169 100755
+--- a/src/common/backend/utils/misc/guc/guc_storage.cpp
++++ b/src/common/backend/utils/misc/guc/guc_storage.cpp
+@@ -245,6 +245,9 @@ static void assign_ss_log_level(int newval, void *extra);
+ static void assign_ss_log_max_file_size(int newval, void *extra);
+ static void assign_ss_log_backup_file_count(int newval, void *extra);
+ 
++static void assign_vacuum_bulk_read_buffer_reallocate(int newval, void* extra);
++static void assign_heap_bulk_read_buffer_reallocate(int newval, void* extra);
++
+ static void InitStorageConfigureNamesBool();
+ static void InitStorageConfigureNamesInt();
+ static void InitStorageConfigureNamesInt64();
+@@ -1388,6 +1391,34 @@ static void InitStorageConfigureNamesInt()
+             NULL,
+             NULL,
+             NULL},
++        {{"vacuum_bulk_read_size",
++            PGC_SIGHUP,
++            NODE_SINGLENODE,
++            RESOURCES_MEM,
++            gettext_noop("bulk blocks number for vacuum pre-read."),
++            NULL,
++            GUC_UNIT_BLOCKS},
++            &g_instance.attr.attr_storage.vacuum_bulk_read_size,
++            0,
++            0,
++            64,
++            NULL,
++            assign_vacuum_bulk_read_buffer_reallocate,
++            NULL},
++        {{"heap_bulk_read_size",
++            PGC_USERSET,
++            NODE_SINGLENODE,
++            RESOURCES_MEM,
++            gettext_noop("bulk blocks number for seqscan pre-read."),
++            NULL,
++            GUC_UNIT_BLOCKS},
++            &u_sess->attr.attr_storage.heap_bulk_read_size,
++            0,
++            0,
++            64,
++            NULL,
++            assign_heap_bulk_read_buffer_reallocate,
++            NULL},
+         {{"huge_page_size",
+             PGC_POSTMASTER,
+             NODE_SINGLENODE,
+@@ -6682,6 +6713,37 @@ static void assign_ss_log_backup_file_count(int newval, void *extra)
+     }
+ }
+ 
++static void assign_vacuum_bulk_read_buffer_reallocate(int newval, void* extra)
++{
++    /* If pre_read_mem_cxt is NULL, it means we naver use heap bulk read, buffer will init later */
++    if (u_sess->storage_cxt.max_vacuum_bulk_read_size <= newval && u_sess->pre_read_mem_cxt != NULL) {
++        MemoryContext oldContext = MemoryContextSwitchTo(u_sess->pre_read_mem_cxt);
++        /* It be safe to charge again */
++        if (u_sess->storage_cxt.bulk_buf_vacuum != NULL) {
++            pfree(u_sess->storage_cxt.bulk_buf_vacuum);
++            u_sess->storage_cxt.bulk_buf_vacuum = (char*)palloc(newval * BLCKSZ); 
++        }
++        (void) MemoryContextSwitchTo(oldContext);
++    }
++    /* Whever we resize the buffer, we always record the max heap bulk extend size for farther compare*/
++    u_sess->storage_cxt.max_vacuum_bulk_read_size = Max(u_sess->storage_cxt.max_vacuum_bulk_read_size, newval);
++}
++
++static void assign_heap_bulk_read_buffer_reallocate(int newval, void* extra)
++{
++    /* If pre_read_mem_cxt is NULL, it means we naver use heap bulk read, buffer will init later */
++    if (u_sess->storage_cxt.max_heap_bulk_read_size <= newval && u_sess->pre_read_mem_cxt != NULL) {
++        MemoryContext oldContext = MemoryContextSwitchTo(u_sess->pre_read_mem_cxt);
++        /* It be safe to charge again */
++        if (u_sess->storage_cxt.bulk_buf_read != NULL) {
++            pfree(u_sess->storage_cxt.bulk_buf_read);
++            u_sess->storage_cxt.bulk_buf_read = (char*)palloc(newval * BLCKSZ); 
++        }
++        (void) MemoryContextSwitchTo(oldContext);
++    }
++    /* Whever we resize the buffer, we always record the max heap bulk extend size for farther compare*/
++    u_sess->storage_cxt.max_heap_bulk_read_size = Max(u_sess->storage_cxt.max_heap_bulk_read_size, newval);
++}
+ 
+ static bool check_logical_decode_options_default(char** newval, void** extra, GucSource source)
+ {
+diff --git a/src/gausskernel/optimizer/commands/vacuumlazy.cpp b/src/gausskernel/optimizer/commands/vacuumlazy.cpp
+index 75792c5cd..73ee5c2e6 100644
+--- a/src/gausskernel/optimizer/commands/vacuumlazy.cpp
++++ b/src/gausskernel/optimizer/commands/vacuumlazy.cpp
+@@ -1166,7 +1166,17 @@ static IndexBulkDeleteResult** lazy_scan_heap(
+          */
+         visibilitymap_pin(onerel, blkno, &vmbuffer);
+ 
+-        buf = ReadBufferExtended(onerel, MAIN_FORKNUM, blkno, RBM_NORMAL, vac_strategy);
++        /*
++         * We do pre-read for lazy-vacuum when we cant skip the visible blocks.
++         * If we do it directly, we will read many blocks what we dont neet to
++         * check, it is useless and meaningless.
++         */
++        if (g_instance.attr.attr_storage.vacuum_bulk_read_size > 0 && !skipping_all_visible_blocks) {
++            int maxBLockCount = nblocks - blkno;
++            buf = MultiReadBufferExtend(onerel, MAIN_FORKNUM, blkno, RBM_NORMAL, vac_strategy, maxBLockCount, true);
++        } else {
++            buf = ReadBufferExtended(onerel, MAIN_FORKNUM, blkno, RBM_NORMAL, vac_strategy);
++        }
+         /* We need buffer cleanup lock so that we can prune HOT chains. */
+         if (!ConditionalLockBufferForCleanup(buf)) {
+             /*
+diff --git a/src/gausskernel/process/threadpool/knl_session.cpp b/src/gausskernel/process/threadpool/knl_session.cpp
+index a9720c291..689d46da3 100755
+--- a/src/gausskernel/process/threadpool/knl_session.cpp
++++ b/src/gausskernel/process/threadpool/knl_session.cpp
+@@ -996,6 +996,18 @@ static void knl_u_storage_init(knl_u_storage_context* storage_cxt)
+     storage_cxt->LocalBufferContext = NULL;
+     storage_cxt->partition_dml_oids = NIL;
+     storage_cxt->partition_ddl_oids = NIL;
++
++    /* pre-read params */
++    storage_cxt->bulk_io_is_in_progress = false;
++    storage_cxt->bulk_io_in_progress_count = 0;
++    storage_cxt->bulk_io_in_progress_buf = NULL;
++    storage_cxt->bulk_io_is_for_input = NULL;
++    storage_cxt->bulk_io_count = 0;
++    storage_cxt->bulk_io_error_count = 0;
++    storage_cxt->bulk_buf_read = NULL;
++    storage_cxt->bulk_buf_vacuum = NULL;
++    storage_cxt->max_heap_bulk_read_size = 0;
++    storage_cxt->max_vacuum_bulk_read_size = 0;
+ }
+ 
+ static void knl_u_libpq_init(knl_u_libpq_context* libpq_cxt)
+@@ -1453,6 +1465,7 @@ void knl_session_init(knl_session_context* sess_cxt)
+     sess_cxt->top_transaction_mem_cxt = NULL;
+     sess_cxt->self_mem_cxt = NULL;
+     sess_cxt->temp_mem_cxt = NULL;
++    sess_cxt->pre_read_mem_cxt = NULL;
+     sess_cxt->dbesql_mem_cxt = NULL;
+     sess_cxt->guc_variables = NULL;
+     sess_cxt->num_guc_variables = 0;
+diff --git a/src/gausskernel/storage/access/heap/heapam.cpp b/src/gausskernel/storage/access/heap/heapam.cpp
+index 6deb69a9d..68daa6957 100755
+--- a/src/gausskernel/storage/access/heap/heapam.cpp
++++ b/src/gausskernel/storage/access/heap/heapam.cpp
+@@ -339,7 +339,20 @@ void heapgetpage(TableScanDesc sscan, BlockNumber page, bool* has_cur_xact_write
+     CHECK_FOR_INTERRUPTS();
+ 
+     /* read page using selected strategy */
+-    scan->rs_base.rs_cbuf = ReadBufferExtended(scan->rs_base.rs_rd, MAIN_FORKNUM, page, RBM_NORMAL, scan->rs_base.rs_strategy);
++    if (u_sess->attr.attr_storage.heap_bulk_read_size > 0 
++        && ScanDirectionIsForward(scan->bulk_scan_direction) 
++        && page != scan->rs_base.rs_startblock
++        && !(IsDefaultExtremeRtoMode() && RecoveryInProgress() && IsExtremeRtoRunning() && is_exrto_standby_read_worker())) {
++        int maxBulkBlockCount = scan->rs_base.rs_nblocks - page;
++        if (scan->rs_base.rs_strategy != NULL) {
++            maxBulkBlockCount = Min(scan->rs_base.rs_strategy->ring_size, maxBulkBlockCount);
++        }
++        /* The entry of pre-read */
++        scan->rs_base.rs_cbuf = MultiReadBufferExtend(scan->rs_base.rs_rd, MAIN_FORKNUM, page, RBM_NORMAL, 
++            scan->rs_base.rs_strategy, maxBulkBlockCount, false);
++    } else {
++        scan->rs_base.rs_cbuf = ReadBufferExtended(scan->rs_base.rs_rd, MAIN_FORKNUM, page, RBM_NORMAL, scan->rs_base.rs_strategy);
++    }
+     scan->rs_base.rs_cblock = page;
+ 
+     if (!scan->rs_base.rs_pageatatime) {
+@@ -1024,6 +1037,9 @@ static void heapgettup_pagemode(HeapScanDesc scan, ScanDirection dir, int nkeys,
+     int lines_left;
+     ItemId lpp;
+ 
++    /* record the bulk read direction */
++    scan->bulk_scan_direction = dir;
++
+     Assert(tuple != NULL && TUPLE_IS_HEAP_TUPLE(tuple));
+ 
+     /* IO collector and IO scheduler for seqsan */
+diff --git a/src/gausskernel/storage/buffer/bufmgr.cpp b/src/gausskernel/storage/buffer/bufmgr.cpp
+index 93dc79abc..bf7c6d15a 100644
+--- a/src/gausskernel/storage/buffer/bufmgr.cpp
++++ b/src/gausskernel/storage/buffer/bufmgr.cpp
+@@ -1630,6 +1630,62 @@ Buffer ReadBuffer(Relation reln, BlockNumber block_num)
+     return ReadBufferExtended(reln, MAIN_FORKNUM, block_num, RBM_NORMAL, NULL);
+ }
+ 
++Buffer MultiReadBufferExtend(Relation reln, ForkNumber fork_num, BlockNumber block_num, ReadBufferMode mode,
++                                     BufferAccessStrategy strategy, int maxBulkCount, bool isVacuum)
++{
++    bool hit;
++    Buffer buf;
++    char* bufRead;
++    int paramNum = 0;
++    MemoryContext* memCxt = NULL;
++    MemoryContext oldContext;
++
++    if (block_num == P_NEW) {
++        STORAGE_SPACE_OPERATION(reln, BLCKSZ);
++    }
++
++    RelationOpenSmgr(reln);
++    if (RELATION_IS_OTHER_TEMP(reln) && fork_num <= INIT_FORKNUM) {
++        /* We would be likely to get wrong data since we have no visibility into the owning session's local buffers. */
++        ereport(ERROR,
++                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot access temporary tables of other sessions")));
++    }
++
++    /* Read the buffer. */
++    pgstat_count_buffer_read(reln);
++    pgstatCountBlocksFetched4SessionLevel();
++
++    if (RelationisEncryptEnable(reln)) {
++        reln->rd_smgr->encrypt = true;
++    }
++     /*
++      * We will charge what parms we will use by isVacuum.
++      * Two Branch is same, we will check cxt and bulk_buf.
++      */
++    paramNum = isVacuum ? g_instance.attr.attr_storage.vacuum_bulk_read_size : u_sess->attr.attr_storage.heap_bulk_read_size;
++    if (u_sess->pre_read_mem_cxt == NULL) {
++        u_sess->pre_read_mem_cxt = AllocSetContextCreate(
++                u_sess->top_mem_cxt, "Memory Context for pre-read and pre-extend", ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
++        oldContext = MemoryContextSwitchTo(u_sess->pre_read_mem_cxt);
++        if (isVacuum) {
++            u_sess->storage_cxt.bulk_buf_vacuum = (char*)palloc(u_sess->storage_cxt.max_vacuum_bulk_read_size * BLCKSZ);
++        } else {
++            u_sess->storage_cxt.bulk_buf_read = (char*)palloc(u_sess->storage_cxt.max_heap_bulk_read_size * BLCKSZ);
++        }
++        (void) MemoryContextSwitchTo(oldContext);
++    }
++
++    bufRead = isVacuum ? u_sess->storage_cxt.bulk_buf_vacuum : u_sess->storage_cxt.bulk_buf_read;
++    buf = MultiBulkReadBufferCommon(reln->rd_smgr, reln->rd_rel->relpersistence, fork_num, block_num, mode, strategy, &hit, maxBulkCount, NULL, paramNum, bufRead);
++    
++    if (hit) {
++        /* Update pgstat counters to reflect a cache hit */
++        pgstat_count_buffer_hit(reln);
++    }
++    return buf;
++
++}
++
+ Buffer buffer_read_extended_internal(Relation reln, ForkNumber fork_num, BlockNumber block_num, ReadBufferMode mode,
+                                      BufferAccessStrategy strategy)
+ {
+@@ -2240,6 +2296,219 @@ static inline void BufferDescSetPBLK(BufferDesc *buf, const XLogPhyBlock *pblk)
+     }
+ }
+ 
++/* 
++ * 
++ * MultiBulkReadBufferCommon
++ * This function is prepared for pre-read, and it cant be use to allocate new buffer
++ */
++Buffer MultiBulkReadBufferCommon(SMgrRelation smgr, char relpersistence, ForkNumber forkNum, BlockNumber firstBlockNum,
++                                ReadBufferMode mode, BufferAccessStrategy strategy, bool *hit, int maxBulkCount, const XLogPhyBlock *pblk, int paramNum, char* bufRead)
++{
++    BufferDesc *bufHdr = NULL;
++    BufferDesc *firstBufHdr = NULL;
++    char* buf_read = NULL;
++    Block bufBlock;
++    int index = 0;
++    int actual_bulk_count = 0;
++    int remaining_lwlock = 0;
++    bool found = false;
++    bool isLocalBuf = SmgrIsTemp(smgr);
++    MemoryContext oldContext;
++    bool* check_fail;
++
++    *hit = false;
++
++    maxBulkCount = Min(paramNum, maxBulkCount);
++
++    if (firstBlockNum == P_NEW || maxBulkCount <= 1 || mode != RBM_NORMAL || ENABLE_DSS) {
++        /* If dont have qualify to pre-read (PS: including DSS)*/
++        return ReadBuffer_common(smgr, relpersistence, forkNum, firstBlockNum, mode, strategy, hit, pblk);
++    }
++    /* Formmer BufferAlloc and TerimateIO cant satisfied this condition，so we must use more array */
++    Assert(!u_sess->storage_cxt.bulk_io_is_in_progress);
++    Assert(u_sess->storage_cxt.bulk_io_in_progress_count == 0);
++
++    u_sess->storage_cxt.bulk_io_is_in_progress = true;
++
++    /* Allocate Memory Context for arrays once */
++    /* If bulk_io_in_progress_buf is not NULL, it means we have mem_cxt already */
++    if (u_sess->storage_cxt.bulk_io_in_progress_buf == NULL) {
++        /* The first switch is to create the bulk buf for record buffer reading */
++        oldContext = MemoryContextSwitchTo(u_sess->pre_read_mem_cxt);
++        u_sess->storage_cxt.bulk_io_in_progress_buf = (BufferDesc**)palloc(MAX_BULK_IO_SIZE * sizeof(u_sess->storage_cxt.bulk_io_in_progress_buf[0]));
++        u_sess->storage_cxt.bulk_io_is_for_input = (bool*)palloc(MAX_BULK_IO_SIZE * sizeof(u_sess->storage_cxt.bulk_io_is_for_input[0]));
++        (void) MemoryContextSwitchTo(oldContext);
++        Assert(u_sess->storage_cxt.bulk_io_is_for_input != NULL);
++    } 
++
++    *hit = false;
++    /* Make sure we will have room to remember the buffer pin */
++    ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);   
++    /* IO compand operation */
++
++    TRACE_POSTGRESQL_BUFFER_READ_START(forkNum, firstBlockNum, smgr->smgr_rnode.node.spcNode, smgr->smgr_rnode.node.dbNode,
++                                       smgr->smgr_rnode.node.relNode, smgr->smgr_rnode.backend, false);
++
++    if (isLocalBuf) {
++        bufHdr = LocalBufferAlloc(smgr, forkNum, firstBlockNum, &found);
++        if (found) {
++            u_sess->instr_cxt.pg_buffer_usage->local_blks_hit++;
++        } else {
++            u_sess->instr_cxt.pg_buffer_usage->local_blks_read++;
++            pgstatCountLocalBlocksRead4SessionLevel();
++        }
++    } else {
++        /*
++         * lookup the buffer.  IO_IN_PROGRESS is set if the requested block is
++         * not currently in memory.
++         */
++        bufHdr = BufferAlloc(smgr->smgr_rnode.node, relpersistence, forkNum, firstBlockNum, strategy, &found, pblk);
++        if (g_instance.attr.attr_security.enable_tde && IS_PGXC_DATANODE) {
++            bufHdr->extra->encrypt = smgr->encrypt ? true : false; 
++        }
++        if (found) {
++            u_sess->instr_cxt.pg_buffer_usage->shared_blks_hit++;
++        } else {
++            u_sess->instr_cxt.pg_buffer_usage->shared_blks_read++;
++            pgstatCountSharedBlocksRead4SessionLevel();
++        }
++    }
++found_branch:
++    if (found) {
++        *hit = true;
++        t_thrd.vacuum_cxt.VacuumPageHit++;
++
++        if (t_thrd.vacuum_cxt.VacuumCostActive)
++            t_thrd.vacuum_cxt.VacuumCostBalance += u_sess->attr.attr_storage.VacuumCostPageHit;
++
++        TRACE_POSTGRESQL_BUFFER_READ_DONE(forkNum, firstBlockNum, smgr->smgr_rnode.node.spcNode,
++                                          smgr->smgr_rnode.node.dbNode, smgr->smgr_rnode.node.relNode,
++                                          smgr->smgr_rnode.backend, isExtend, found);
++        /*
++         * Mode cannot be RBM_ZERO_AND_CLEANUP_LOCK/RBM_ZERO_AND_LOCK here.
++         * So, "In RBM_ZERO_AND_LOCK mode the caller expects the page to
++         * be locked on return." can be ignored.
++         */
++        if (!isLocalBuf && t_thrd.role != PAGEREDO && SS_ONDEMAND_BUILD_DONE && SS_PRIMARY_MODE) {
++            /* Mode cannot be RBM_ZERO_AND_CLEANUP_LOCK/RBM_ZERO_AND_LOCK here */
++            bufHdr = RedoForOndemandExtremeRTOQuery(bufHdr, relpersistence, forkNum, firstBlockNum, mode);
++        }
++        u_sess->storage_cxt.bulk_io_is_in_progress = false;
++        return BufferDescriptorGetBuffer(bufHdr);
++    }
++    /* If we must read buffers from disk right now. */
++    Assert(!(pg_atomic_read_u64(&bufHdr->state) & BM_VALID)); /* spinlock not needed */
++    Assert(u_sess->storage_cxt.bulk_io_in_progress_count == 1);
++    Assert(u_sess->storage_cxt.bulk_io_in_progress_buf[u_sess->storage_cxt.bulk_io_in_progress_count - 1] == bufHdr);
++
++    /* The first buffer Desc for return */
++    firstBufHdr =bufHdr;
++
++    /* We should caculate the max-blocks again, MAX_SIMUL_LWLOCKS is 4224 */
++    maxBulkCount = Min(maxBulkCount, (BlockNumber) RELSEG_SIZE - (firstBlockNum % (BlockNumber) RELSEG_SIZE));
++    remaining_lwlock = MAX_SIMUL_LWLOCKS - t_thrd.storage_cxt.num_held_lwlocks;
++    maxBulkCount = Min(remaining_lwlock, maxBulkCount);
++
++    /* We start to allocate buffers array for preparing reading */
++    for (index = 1; index < maxBulkCount; index++) {
++        BlockNumber blockNum = firstBlockNum + index;
++        ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
++        if (isLocalBuf) {
++            bufHdr = LocalBufferAlloc(smgr, forkNum, blockNum, &found);
++        } else {
++            bufHdr = BufferAlloc(smgr->smgr_rnode.node, relpersistence, forkNum, blockNum, strategy, &found, pblk);
++            if (g_instance.attr.attr_security.enable_tde && IS_PGXC_DATANODE) {
++                bufHdr->extra->encrypt = smgr->encrypt ? true : false; /* set tde flag */
++            }
++        }
++        if(found) {
++            /* If we found a needed block, we should stop pre-read right now */
++            ReleaseBuffer(BufferDescriptorGetBuffer(bufHdr));
++            break;
++        }
++        Assert(!(pg_atomic_read_u64(&bufHdr->state) & BM_VALID));   /* spinlock not needed */
++    }
++
++    Assert(index == u_sess->storage_cxt.bulk_io_in_progress_count);
++
++    /* 2023-10-25 The numbers of blocks we really need to pre-read */
++    actual_bulk_count = u_sess->storage_cxt.bulk_io_in_progress_count;
++
++    if (actual_bulk_count == 1) {
++        buf_read = isLocalBuf ? (char*)LocalBufHdrGetBlock(firstBufHdr) : (char*)BufHdrGetBlock(firstBufHdr);
++    } else {
++        buf_read = bufRead;
++    }
++    
++    /* Bulk-read function, read a batch of pages from disk */
++    smgrbulkread(smgr, forkNum, firstBlockNum, actual_bulk_count, buf_read);
++    
++    /* We start to get blocks from buf_read one by one */
++    for (index = 0; index < actual_bulk_count; index++) {
++        BlockNumber blockNum = firstBlockNum + index;
++        bufBlock = (Block)(buf_read + index * BLCKSZ);
++
++        /* If the page is not legal, it always occurs by CRC error */
++        if (!PageIsVerified((Page)bufBlock, blockNum)) {
++            u_sess->storage_cxt.bulk_io_error_count++;
++            if (u_sess->attr.attr_security.zero_damaged_pages) {
++                ereport(WARNING, (errcode(ERRCODE_DATA_CORRUPTED),
++                                  errmsg("invalid page in block %u of relation %s; zeroing out page", blockNum,
++                                         relpath(smgr->smgr_rnode, forkNum)),
++                                  handle_in_client(true)));
++                MemSet((char *)bufBlock, 0, BLCKSZ);
++            } else {
++                ereport(ERROR,
++                            (errcode(ERRCODE_DATA_CORRUPTED),
++                             errmsg("invalid page in block %u of relation %s",
++                                    blockNum,
++                                    relpath(smgr->smgr_rnode, forkNum))));
++            }
++        } else {
++            PageDataDecryptIfNeed((Page)bufBlock);
++        }
++    }
++
++    /* We will fill blocks in buffers one by one */
++    for (index = actual_bulk_count -1; index >= 0; index--) {
++        bufHdr = u_sess->storage_cxt.bulk_io_in_progress_buf[index];
++
++        bufBlock = isLocalBuf ? LocalBufHdrGetBlock(bufHdr) : BufHdrGetBlock(bufHdr);
++        if (actual_bulk_count != 1) {
++            memcpy((char *)bufBlock, buf_read + index * BLCKSZ, BLCKSZ);
++        }
++
++        /* Attension, in local buffer, we do bulk_io_in_progress_count-- directly*/
++        if (isLocalBuf) {
++            uint64 buf_state = pg_atomic_read_u64(&bufHdr->state);
++            buf_state |= BM_VALID;
++            pg_atomic_write_u64(&bufHdr->state, buf_state);
++            u_sess->storage_cxt.bulk_io_in_progress_count--;
++        } else {
++            TerminateBufferIO(bufHdr, false, BM_VALID);
++        }
++
++        /* important: buffers except firstBlockNum should release pin */
++        if (index != 0) {
++            ReleaseBuffer(BufferDescriptorGetBuffer(bufHdr));
++        }
++
++        t_thrd.vacuum_cxt.VacuumPageMiss++;
++        if (t_thrd.vacuum_cxt.VacuumCostActive) {
++            t_thrd.vacuum_cxt.VacuumCostBalance += u_sess->attr.attr_storage.VacuumCostPageMiss; 
++        }
++    }
++    TRACE_POSTGRESQL_BUFFER_READ_DONE(forkNum, firstBlockNum, smgr->smgr_rnode.node.spcNode, smgr->smgr_rnode.node.dbNode,
++                                      smgr->smgr_rnode.node.relNode, smgr->smgr_rnode.backend, isExtend, found);
++
++    /*  We will record the number we really done */
++    u_sess->storage_cxt.bulk_io_count += actual_bulk_count;
++    u_sess->storage_cxt.bulk_io_is_in_progress = false;
++    Assert(!u_sess->storage_cxt.bulk_io_is_in_progress);
++    Assert(u_sess->storage_cxt.bulk_io_in_progress_count == 0);
++    return BufferDescriptorGetBuffer(firstBufHdr);
++}
++
+ /*
+  * ReadBuffer_common -- common logic for all ReadBuffer variants
+  *
+@@ -6488,8 +6757,16 @@ bool StartBufferIO(BufferDesc *buf, bool for_input)
+     buf_state |= BM_IO_IN_PROGRESS;
+     UnlockBufHdr(buf, buf_state);
+ 
+-    t_thrd.storage_cxt.InProgressBuf = buf;
+-    t_thrd.storage_cxt.IsForInput = for_input;
++    /* If we under the pre-read model, we will use customized array instead of InProgressBuf */
++    if (!u_sess->storage_cxt.bulk_io_is_in_progress) {
++        t_thrd.storage_cxt.InProgressBuf = buf;
++        t_thrd.storage_cxt.IsForInput = for_input;
++    } else {
++        /* We will record current buf for Abort at some times */
++        u_sess->storage_cxt.bulk_io_in_progress_buf[u_sess->storage_cxt.bulk_io_in_progress_count] = buf;
++        u_sess->storage_cxt.bulk_io_is_for_input[u_sess->storage_cxt.bulk_io_in_progress_count] = for_input;
++        u_sess->storage_cxt.bulk_io_in_progress_count++;
++    }
+ 
+     return true;
+ }
+@@ -6518,9 +6795,18 @@ bool StartBufferIO(BufferDesc *buf, bool for_input)
+  */
+ void TerminateBufferIO(volatile BufferDesc *buf, bool clear_dirty, uint64 set_flag_bits)
+ {
+-    Assert(buf == t_thrd.storage_cxt.InProgressBuf);
++    /* Parmas check */
++    Assert(u_sess->storage_cxt.bulk_io_is_in_progress || buf == t_thrd.storage_cxt.InProgressBuf);
++    Assert(!u_sess->storage_cxt.bulk_io_is_in_progress || u_sess->storage_cxt.bulk_io_in_progress_count > 0);
++    Assert(!u_sess->storage_cxt.bulk_io_is_in_progress || buf == u_sess->storage_cxt.bulk_io_in_progress_buf[u_sess->storage_cxt.bulk_io_in_progress_count - 1]);
++
+     TerminateBufferIO_common((BufferDesc *)buf, clear_dirty, set_flag_bits);
+-    t_thrd.storage_cxt.InProgressBuf = NULL;
++    /* When in pre-read, we focus in bulk_io_in_progress_count instead of InProgressBuf */
++    if (!u_sess->storage_cxt.bulk_io_is_in_progress) {
++        t_thrd.storage_cxt.InProgressBuf = NULL;
++    } else {
++        u_sess->storage_cxt.bulk_io_in_progress_count--;
++    }
+     LWLockRelease(((BufferDesc *)buf)->io_in_progress_lock);
+ }
+ 
+@@ -6637,7 +6923,11 @@ void AbortBufferIO(void)
+     BufferDesc *buf = (BufferDesc *)t_thrd.storage_cxt.InProgressBuf;
+     bool isForInput = (bool)t_thrd.storage_cxt.IsForInput;
+ 
+-    if (buf != NULL) {
++bulk_read_loop:
++    if (buf && buf->buf_id < 0) {
++        /* If it is in local storage now. It seems not come to here, protect this branch. */
++        u_sess->storage_cxt.bulk_io_in_progress_count--;
++    } else if (buf != NULL) {
+         /*
+          * For Sync I/O
+          * LWLockReleaseAll was already been called, so we're not holding
+@@ -6651,6 +6941,17 @@ void AbortBufferIO(void)
+     }
+ 
+     AbortSegBufferIO();
++
++    /* If it is in pre-read process, we will loop for many times because of having many blocks. */
++    if (u_sess->storage_cxt.bulk_io_is_in_progress) {
++        if (u_sess->storage_cxt.bulk_io_in_progress_count > 0) {
++            buf = u_sess->storage_cxt.bulk_io_in_progress_buf[u_sess->storage_cxt.bulk_io_in_progress_count - 1];
++            isForInput = u_sess->storage_cxt.bulk_io_is_for_input[u_sess->storage_cxt.bulk_io_in_progress_count - 1];
++            goto bulk_read_loop;
++        }
++        /* u_sess->storage_cxt.bulk_io_in_progress_count is zero means all is over */
++        u_sess->storage_cxt.bulk_io_is_in_progress = false;
++    }
+ }
+ 
+ /*
+diff --git a/src/gausskernel/storage/buffer/localbuf.cpp b/src/gausskernel/storage/buffer/localbuf.cpp
+index b683d085f..a8d80025a 100644
+--- a/src/gausskernel/storage/buffer/localbuf.cpp
++++ b/src/gausskernel/storage/buffer/localbuf.cpp
+@@ -173,6 +173,13 @@ BufferDesc *LocalBufferAlloc(SMgrRelation smgr, ForkNumber forkNum, BlockNumber
+         u_sess->storage_cxt.LocalRefCount[b]++;
+         ResourceOwnerRememberBuffer(t_thrd.utils_cxt.CurrentResourceOwner, BufferDescriptorGetBuffer(buf_desc));
+         *foundPtr = (buf_state & BM_VALID) ? TRUE : FALSE; /* If previous read attempt have failed; try again */
++        if (*foundPtr == FALSE) {
++            if (u_sess->storage_cxt.bulk_io_is_in_progress) {   
++                /* If not found, we record this buf */
++                u_sess->storage_cxt.bulk_io_in_progress_buf[u_sess->storage_cxt.bulk_io_in_progress_count] = buf_desc;
++                u_sess->storage_cxt.bulk_io_in_progress_count++;
++            }
++        }
+ #ifdef EXTREME_RTO_DEBUG
+         ereport(LOG, (errmsg("LocalBufferAlloc %u/%u/%u %u %u find in local buf %u/%u/%u %u %u id %d state %lu, lsn %lu",
+                              smgr->smgr_rnode.node.spcNode, smgr->smgr_rnode.node.dbNode, smgr->smgr_rnode.node.relNode,
+@@ -278,6 +285,11 @@ BufferDesc *LocalBufferAlloc(SMgrRelation smgr, ForkNumber forkNum, BlockNumber
+     buf_desc->extra->seg_fileno = EXTENT_INVALID;
+ 
+     *foundPtr = FALSE;
++    if (u_sess->storage_cxt.bulk_io_is_in_progress) {   
++       /* If not found, we record this buf */
++        u_sess->storage_cxt.bulk_io_in_progress_buf[u_sess->storage_cxt.bulk_io_in_progress_count] = buf_desc;
++        u_sess->storage_cxt.bulk_io_in_progress_count++;
++    }
+     return buf_desc;
+ }
+ 
+diff --git a/src/gausskernel/storage/smgr/md.cpp b/src/gausskernel/storage/smgr/md.cpp
+index 51b9e9a6b..c1733e05e 100644
+--- a/src/gausskernel/storage/smgr/md.cpp
++++ b/src/gausskernel/storage/smgr/md.cpp
+@@ -1327,6 +1327,52 @@ SMGR_READ_STATUS mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber block
+     }
+ }
+ 
++/*
++ *  mdreadbatch() -- It will bulk read many pages;
++ *  It will not return any error code, because it will check in page devided.
++ */
++void mdreadbatch(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, int blockCount,char *buffer)
++{
++    off_t seekpos;
++    int nbytes;
++    MdfdVec *v = NULL;
++    int amount = blockCount * BLCKSZ;
++    v = _mdfd_getseg(reln, forknum, blocknum, false, EXTENSION_FAIL);
++
++    seekpos = (off_t)BLCKSZ * (blocknum % ((BlockNumber)RELSEG_SIZE));
++
++    Assert(seekpos < (off_t) BLCKSZ * RELSEG_SIZE);
++    Assert(seekpos + (off_t) amount <= (off_t) BLCKSZ * RELSEG_SIZE);
++
++    nbytes = FilePRead(v->mdfd_vfd, buffer, amount, seekpos, WAIT_EVENT_DATA_FILE_READ);
++
++    if (nbytes != amount) {
++        if (nbytes < 0) {
++            ereport(ERROR, (errcode_for_file_access(),
++                            errmsg("could not read block %u in file \"%s\": %m", blocknum, FilePathName(v->mdfd_vfd))));
++        }
++        /*
++         * Short read: we are at or past EOF, or we read a partial block at
++         * EOF.  Normally this is an error; upper levels should never try to
++         * read a nonexistent block.  However, if zero_damaged_pages is ON or
++         * we are InRecovery, we should instead return zeroes without
++         * complaining.  This allows, for example, the case of trying to
++         * update a block that was later truncated away.
++         */
++        if (u_sess->attr.attr_security.zero_damaged_pages || t_thrd.xlog_cxt.InRecovery) {
++            int damaged_pages_start_offset = nbytes - nbytes % BLCKSZ;
++            MemSet((char*)buffer + damaged_pages_start_offset, 0, amount - damaged_pages_start_offset);
++        } else {
++            check_file_stat(FilePathName(v->mdfd_vfd));
++            force_backtrace_messages = true;
++            extreme_rto_standby_read::dump_error_all_info(reln->smgr_rnode.node, forknum, blocknum);//standby节点
++            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
++                            errmsg("could not read block %u in file \"%s\": read only %d of %d bytes", blocknum,
++                                   FilePathName(v->mdfd_vfd), nbytes, BLCKSZ)));
++        }
++    }
++}
++
+ /*
+  *  mdwrite() -- Write the supplied block at the appropriate location.
+  *
+diff --git a/src/gausskernel/storage/smgr/smgr.cpp b/src/gausskernel/storage/smgr/smgr.cpp
+index b7ff7a4ff..eb856a179 100755
+--- a/src/gausskernel/storage/smgr/smgr.cpp
++++ b/src/gausskernel/storage/smgr/smgr.cpp
+@@ -53,6 +53,7 @@ typedef struct f_smgr {
+     void (*smgr_extend)(SMgrRelation reln, ForkNumber forknum, BlockNumber blockNum, char *buffer, bool skipFsync);
+     void (*smgr_prefetch)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum);
+     SMGR_READ_STATUS (*smgr_read)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer);
++    void (*smgr_bulkread)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, int blockCount, char *buffer);
+     void (*smgr_write)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const char *buffer, bool skipFsync);
+     void (*smgr_writeback)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks);
+     BlockNumber (*smgr_nblocks)(SMgrRelation reln, ForkNumber forknum);
+@@ -74,6 +75,7 @@ static const f_smgr smgrsw[] = {
+       mdextend,
+       mdprefetch,
+       mdread,
++      mdreadbatch,
+       mdwrite,
+       mdwriteback,
+       mdnblocks,
+@@ -95,6 +97,7 @@ static const f_smgr smgrsw[] = {
+         ExtendUndoFile,
+         PrefetchUndoFile,
+         ReadUndoFile,
++        NULL,
+         WriteUndoFile,
+         WritebackUndoFile,
+         GetUndoFileNblocks,
+@@ -113,6 +116,7 @@ static const f_smgr smgrsw[] = {
+         seg_extend,
+         seg_prefetch,
+         seg_read,
++        NULL,
+         seg_write,
+         seg_writeback,
+         seg_nblocks,
+@@ -134,6 +138,7 @@ static const f_smgr smgrsw[] = {
+         exrto_extend,
+         NULL,
+         exrto_read,
++        NULL,
+         exrto_write,
+         exrto_writeback,
+         exrto_nblocks,
+@@ -746,6 +751,11 @@ void smgrasyncwrite(SMgrRelation reln, ForkNumber forknum, AioDispatchDesc_t **d
+     (*(smgrsw[reln->smgr_which].smgr_async_write))(reln, forknum, dList, dn);
+ }
+ 
++void smgrbulkread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, int blockCount, char* buffer)
++{
++    (*(smgrsw[reln->smgr_which].smgr_bulkread))(reln, forknum, blocknum, blockCount, buffer);
++}
++
+ /*
+  * smgrread() -- read a particular block from a relation into the supplied buffer.
+  *
+diff --git a/src/include/access/relscan.h b/src/include/access/relscan.h
+index f151c7c01..65bd245d7 100644
+--- a/src/include/access/relscan.h
++++ b/src/include/access/relscan.h
+@@ -85,6 +85,8 @@ typedef struct HeapScanDescData {
+ #ifdef USE_SPQ
+     SPQScanDesc spq_scan;
+ #endif
++    /* scan direction value for bulk read */
++    ScanDirection bulk_scan_direction;
+ 
+     /* this must be the end of this sturcture */
+     HeapTupleHeaderData rs_ctbuf_hdr;
+diff --git a/src/include/knl/knl_guc/knl_instance_attr_storage.h b/src/include/knl/knl_guc/knl_instance_attr_storage.h
+index 41d128181..9376dbdef 100755
+--- a/src/include/knl/knl_guc/knl_instance_attr_storage.h
++++ b/src/include/knl/knl_guc/knl_instance_attr_storage.h
+@@ -237,6 +237,8 @@ typedef struct knl_instance_attr_storage {
+     bool uwal_rpc_flowcontrol_switch;
+     int uwal_rpc_flowcontrol_value;
+     bool uwal_async_append_switch;
++    /* pre-read for lazy_vacuum params */
++    int vacuum_bulk_read_size;
+ } knl_instance_attr_storage;
+ 
+ #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_STORAGE_H_ */
+diff --git a/src/include/knl/knl_guc/knl_session_attr_storage.h b/src/include/knl/knl_guc/knl_session_attr_storage.h
+index eede56ce2..b713a0348 100755
+--- a/src/include/knl/knl_guc/knl_session_attr_storage.h
++++ b/src/include/knl/knl_guc/knl_session_attr_storage.h
+@@ -274,6 +274,9 @@ typedef struct knl_session_attr_storage {
+     
+     bool enable_uwal;
+     char* uwal_path;
++
++    /* pre-read/pre-extend parms */
++    int heap_bulk_read_size;
+ } knl_session_attr_storage;
+ 
+ #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_STORAGE */
+diff --git a/src/include/knl/knl_session.h b/src/include/knl/knl_session.h
+index b54734602..1eccc530c 100644
+--- a/src/include/knl/knl_session.h
++++ b/src/include/knl/knl_session.h
+@@ -1943,6 +1943,27 @@ typedef struct knl_u_storage_context {
+     MemoryContext LocalBufferContext;
+     List *partition_dml_oids; /* list of partitioned table's oid which is on dml operations */
+     List *partition_ddl_oids; /* list of partitioned table's oid which is on ddl operations */
++
++    /* Max value of pre-read parms, they are used for reseting buffers */
++    int max_heap_bulk_read_size;
++    int max_vacuum_bulk_read_size;
++
++    /* Whether in pre-read process */
++    bool bulk_io_is_in_progress;
++    /* Numbers of pre-read blocks */
++    int bulk_io_in_progress_count;
++    /* Buffers for record BufferDesc*/
++    struct BufferDesc** bulk_io_in_progress_buf;
++    /* Buffers for read from disk */
++    char* bulk_buf_read;
++    /* Buffers for read from disk by vacuum*/
++    char* bulk_buf_vacuum;
++    /* Flags array for whether is input */
++    bool *bulk_io_is_for_input;
++    /* Already numbers of pre-read blocks */
++    int bulk_io_count;
++    /* Error numbers of pre-read blocks */
++    int bulk_io_error_count;
+ } knl_u_storage_context;
+ 
+ 
+@@ -2948,6 +2969,8 @@ typedef struct knl_session_context {
+     MemoryContextGroup* mcxt_group;
+     /* temp_mem_cxt is a context which will be reset when the session attach to a thread */
+     MemoryContext temp_mem_cxt;
++    /* pre_read_mem_cxt is a context which will be used in pre-read process */
++    MemoryContext pre_read_mem_cxt;
+     int session_ctr_index;
+     uint64 session_id;
+     GlobalSessionId globalSessionId;
+diff --git a/src/include/storage/buf/bufmgr.h b/src/include/storage/buf/bufmgr.h
+index e36cd3bf9..4c1ae95fd 100644
+--- a/src/include/storage/buf/bufmgr.h
++++ b/src/include/storage/buf/bufmgr.h
+@@ -276,6 +276,8 @@ extern void PageListPrefetch(
+ extern Buffer ReadBuffer(Relation reln, BlockNumber blockNum);
+ extern Buffer ReadBufferExtended(
+     Relation reln, ForkNumber forkNum, BlockNumber blockNum, ReadBufferMode mode, BufferAccessStrategy strategy);
++extern Buffer MultiReadBufferExtend(Relation reln, ForkNumber fork_num, BlockNumber block_num, ReadBufferMode mode,
++                                     BufferAccessStrategy strategy, int maxBulkCount, bool isVacuum);
+ extern Buffer ReadBufferWithoutRelcache(const RelFileNode &rnode, ForkNumber forkNum, BlockNumber blockNum,
+     ReadBufferMode mode, BufferAccessStrategy strategy, const XLogPhyBlock *pblk);
+ extern Buffer ReadUndoBufferWithoutRelcache(const RelFileNode &rnode, ForkNumber forkNum, BlockNumber blockNum,
+@@ -436,6 +438,8 @@ BufferDesc *BufferAlloc(const RelFileNode &rel_file_node, char relpersistence, F
+                         BufferAccessStrategy strategy, bool *foundPtr, const XLogPhyBlock *pblk);
+ Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum, BlockNumber blockNum,
+     ReadBufferMode mode, BufferAccessStrategy strategy, bool *hit, const XLogPhyBlock *pblk);
++Buffer MultiBulkReadBufferCommon(SMgrRelation smgr, char relpersistence, ForkNumber forkNum, BlockNumber firstBlockNum,
++    ReadBufferMode mode, BufferAccessStrategy strategy, bool *hit, int maxBulkCount, const XLogPhyBlock *pblk, int paramNum, char* bufRead);
+ void buffer_in_progress_pop();
+ void buffer_in_progress_push();
+ void SSTryEliminateBuf(uint64 times);
+diff --git a/src/include/storage/smgr/smgr.h b/src/include/storage/smgr/smgr.h
+index ec4271248..2b94e2cd0 100644
+--- a/src/include/storage/smgr/smgr.h
++++ b/src/include/storage/smgr/smgr.h
+@@ -170,6 +170,7 @@ extern void smgrextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blockn
+                        char* buffer, bool skipFsync);
+ extern void smgrprefetch(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum);
+ extern SMGR_READ_STATUS smgrread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char* buffer);
++extern void smgrbulkread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, int blockCount,char *buffer);
+ extern void smgrwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const char* buffer, bool skipFsync);
+ extern void smgrwriteback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks);
+ extern BlockNumber smgrnblocks(SMgrRelation reln, ForkNumber forknum);
+@@ -198,6 +199,7 @@ extern void mdunlink(const RelFileNodeBackend& rnode, ForkNumber forknum, bool i
+ extern void mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char* buffer, bool skipFsync);
+ extern void mdprefetch(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum);
+ extern SMGR_READ_STATUS mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char* buffer);
++extern void mdreadbatch(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, int blockCount,char *buffer);
+ extern void mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const char* buffer, bool skipFsync);
+ extern void mdwriteback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks);
+ extern BlockNumber mdnblocks(SMgrRelation reln, ForkNumber forknum);
+diff --git a/src/include/utils/guc.h b/src/include/utils/guc.h
+index ff38a9ca2..3510dd56d 100755
+--- a/src/include/utils/guc.h
++++ b/src/include/utils/guc.h
+@@ -224,6 +224,8 @@ typedef struct {
+ 
+ #define GUC_NOT_WHILE_SEC_REST 0x8000 /* can't set if security restricted */
+ 
++#define MAX_BULK_IO_SIZE  64 /* bulk process IO size */
++
+ extern THR_LOCAL int log_min_messages;
+ extern THR_LOCAL bool force_backtrace_messages;
+ extern THR_LOCAL int client_min_messages;
+diff --git a/src/test/regress/expected/preread_test.out b/src/test/regress/expected/preread_test.out
+new file mode 100644
+index 000000000..459f8e085
+--- /dev/null
++++ b/src/test/regress/expected/preread_test.out
+@@ -0,0 +1,212 @@
++-- test database create
++CREATE TABLE test (id int, field1 char(400),field2 char(400));
++DO $$
++BEGIN
++    FOR i IN 0..5000 LOOP
++        INSERT INTO test (id, field1, field2) VALUES 
++        (
++            i, 
++            i::text || LPAD('1', 200 - length(i::text), '1'), 
++            i::text || LPAD('2', 200 - length(i::text), '2')
++        );
++    END LOOP;
++END;
++$$;
++-- heap seqscan test;
++SET heap_bulk_read_size TO '64kB';
++SELECT COUNT(*) FROM test;
++ count 
++-------
++  5001
++(1 row)
++
++SELECT COUNT(*) FROM test WHERE test.id >2400;
++ count 
++-------
++  2600
++(1 row)
++
++SELECT test.id, test.field1, test.field2 FROM test
++        WHERE test.id <20 ORDER BY field1 using <;
++ id |                                                                                                                                                                                                      field1                                                                                                                                                                                                      |                                                                                                                                                                                                      field2                                                                                                                                                                                                      
++----+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
++  0 | 01111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 02222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++ 10 | 10111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 10222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++ 11 | 11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 11222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  1 | 11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 12222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++ 12 | 12111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 12222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++ 13 | 13111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 13222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++ 14 | 14111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 14222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++ 15 | 15111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 15222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++ 16 | 16111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 16222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++ 17 | 17111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 17222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++ 18 | 18111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 18222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++ 19 | 19111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 19222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  2 | 21111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 22222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  3 | 31111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 32222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  4 | 41111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 42222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  5 | 51111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 52222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  6 | 61111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 62222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  7 | 71111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 72222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  8 | 81111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 82222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  9 | 91111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 92222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++(20 rows)
++
++select * from test, (values(147, 'RFAAAA'), (931, 'VJAAAA')) as v (i, j)
++    WHERE test.id = v.i;
++ id  |                                                                                                                                                                                                      field1                                                                                                                                                                                                      |                                                                                                                                                                                                      field2                                                                                                                                                                                                      |  i  |   j    
++-----+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----+--------
++ 147 | 14711111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 14722222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                         | 147 | RFAAAA
++ 931 | 93111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 93122222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                         | 931 | VJAAAA
++(2 rows)
++
++select * from test,
++  (values ((select i from
++    (values(''), ('pijinngjijifezxcvzxv'),((select 'jafipejifjeaio'))) as foo(i)
++    order by i asc limit 1))) bar (i)
++  where test.field1 < bar.i LIMIT 5;
++ id |                                                                                                                                                                                                      field1                                                                                                                                                                                                      |                                                                                                                                                                                                      field2                                                                                                                                                                                                      |       i        
++----+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+----------------
++  0 | 01111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 02222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                         | jafipejifjeaio
++  1 | 11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 12222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                         | jafipejifjeaio
++  2 | 21111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 22222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                         | jafipejifjeaio
++  3 | 31111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 32222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                         | jafipejifjeaio
++  4 | 41111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 42222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                         | jafipejifjeaio
++(5 rows)
++
++SELECT t.id, t.field1, t.field2 FROM test* t ORDER BY id using >, field1 LIMIT 10;
++  id  |                                                                                                                                                                                                      field1                                                                                                                                                                                                      |                                                                                                                                                                                                      field2                                                                                                                                                                                                      
++------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
++ 5000 | 50001111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 50002222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++ 4999 | 49991111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 49992222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++ 4998 | 49981111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 49982222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++ 4997 | 49971111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 49972222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++ 4996 | 49961111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 49962222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++ 4995 | 49951111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 49952222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++ 4994 | 49941111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 49942222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++ 4993 | 49931111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 49932222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++ 4992 | 49921111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 49922222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++ 4991 | 49911111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 49912222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++(10 rows)
++
++SELECT t.id, t.field1, t.field2 FROM test* t LIMIT 10;
++ id |                                                                                                                                                                                                      field1                                                                                                                                                                                                      |                                                                                                                                                                                                      field2                                                                                                                                                                                                      
++----+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
++  0 | 01111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 02222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  1 | 11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 12222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  2 | 21111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 22222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  3 | 31111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 32222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  4 | 41111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 42222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  5 | 51111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 52222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  6 | 61111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 62222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  7 | 71111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 72222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  8 | 81111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 82222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  9 | 91111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 92222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++(10 rows)
++
++SELECT * FROM test ORDER BY id LIMIT 10;
++ id |                                                                                                                                                                                                      field1                                                                                                                                                                                                      |                                                                                                                                                                                                      field2                                                                                                                                                                                                      
++----+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
++  0 | 01111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 02222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  1 | 11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 12222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  2 | 21111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 22222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  3 | 31111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 32222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  4 | 41111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 42222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  5 | 51111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 52222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  6 | 61111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 62222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  7 | 71111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 72222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  8 | 81111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 82222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  9 | 91111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 92222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++(10 rows)
++
++SELECT * FROM test ORDER BY id DESC LIMIT 10;
++  id  |                                                                                                                                                                                                      field1                                                                                                                                                                                                      |                                                                                                                                                                                                      field2                                                                                                                                                                                                      
++------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
++ 5000 | 50001111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 50002222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++ 4999 | 49991111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 49992222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++ 4998 | 49981111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 49982222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++ 4997 | 49971111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 49972222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++ 4996 | 49961111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 49962222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++ 4995 | 49951111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 49952222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++ 4994 | 49941111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 49942222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++ 4993 | 49931111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 49932222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++ 4992 | 49921111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 49922222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++ 4991 | 49911111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 49912222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++(10 rows)
++
++SELECT * FROM test ORDER BY id NULLS FIRST LIMIT 10;
++ id |                                                                                                                                                                                                      field1                                                                                                                                                                                                      |                                                                                                                                                                                                      field2                                                                                                                                                                                                      
++----+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
++  0 | 01111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 02222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  1 | 11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 12222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  2 | 21111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 22222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  3 | 31111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 32222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  4 | 41111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 42222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  5 | 51111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 52222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  6 | 61111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 62222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  7 | 71111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 72222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  8 | 81111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 82222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++  9 | 91111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111                                                                                                                                                                                                         | 92222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222                                                                                                                                                                                                        
++(10 rows)
++
++DROP TABLE test;
++SET heap_bulk_read_size TO '0kB';
++--LAZY_VACUUM test
++CREATE TABLE vactst (i INT);
++INSERT INTO vactst VALUES (1);
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst VALUES (0);
++ALTER SYSTEM SET vacuum_bulk_read_size='64kB';
++SELECT count(*) FROM vactst;
++ count 
++-------
++  2049
++(1 row)
++
++DELETE FROM vactst WHERE i != 0;
++SELECT * FROM vactst;
++ i 
++---
++ 0
++(1 row)
++
++VACUUM vactst;
++UPDATE vactst SET i = i + 1;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst VALUES (0);
++SELECT count(*) FROM vactst;
++ count 
++-------
++  2049
++(1 row)
++
++DELETE FROM vactst WHERE i != 0;
++VACUUM vactst;
++DELETE FROM vactst;
++SELECT * FROM vactst;
++ i 
++---
++(0 rows)
++
++DROP TABLE vactst;
++ALTER SYSTEM SET vacuum_bulk_read_size='0kB';
+diff --git a/src/test/regress/parallel_schedule0A b/src/test/regress/parallel_schedule0A
+index 6fb798b61..c06e30c85 100644
+--- a/src/test/regress/parallel_schedule0A
++++ b/src/test/regress/parallel_schedule0A
+@@ -169,6 +169,9 @@ test: single_node_create_function_1
+ # ----------
+ #test: single_node_copy single_node_copyselect
+ 
++# pre-Read test
++test: preread_test
++
+ # ----------
+ # More groups of parallel tests
+ # ----------
+diff --git a/src/test/regress/sql/preread_test.sql b/src/test/regress/sql/preread_test.sql
+new file mode 100644
+index 000000000..550d9b158
+--- /dev/null
++++ b/src/test/regress/sql/preread_test.sql
+@@ -0,0 +1,99 @@
++-- test database create
++
++CREATE TABLE test (id int, field1 char(400),field2 char(400));
++
++DO $$
++BEGIN
++    FOR i IN 0..5000 LOOP
++        INSERT INTO test (id, field1, field2) VALUES 
++        (
++            i, 
++            i::text || LPAD('1', 200 - length(i::text), '1'), 
++            i::text || LPAD('2', 200 - length(i::text), '2')
++        );
++    END LOOP;
++END;
++$$;
++
++
++-- heap seqscan test;
++SET heap_bulk_read_size TO '64kB';
++
++SELECT COUNT(*) FROM test;
++
++SELECT COUNT(*) FROM test WHERE test.id >2400;
++
++SELECT test.id, test.field1, test.field2 FROM test
++        WHERE test.id <20 ORDER BY field1 using <;
++
++
++select * from test, (values(147, 'RFAAAA'), (931, 'VJAAAA')) as v (i, j)
++    WHERE test.id = v.i;
++
++select * from test,
++  (values ((select i from
++    (values(''), ('pijinngjijifezxcvzxv'),((select 'jafipejifjeaio'))) as foo(i)
++    order by i asc limit 1))) bar (i)
++  where test.field1 < bar.i LIMIT 5;
++
++SELECT t.id, t.field1, t.field2 FROM test* t ORDER BY id using >, field1 LIMIT 10;
++
++SELECT t.id, t.field1, t.field2 FROM test* t LIMIT 10;
++
++SELECT * FROM test ORDER BY id LIMIT 10;
++
++SELECT * FROM test ORDER BY id DESC LIMIT 10;
++
++SELECT * FROM test ORDER BY id NULLS FIRST LIMIT 10;
++
++DROP TABLE test;
++SET heap_bulk_read_size TO '0kB';
++
++
++--LAZY_VACUUM test
++
++CREATE TABLE vactst (i INT);
++INSERT INTO vactst VALUES (1);
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst VALUES (0);
++
++ALTER SYSTEM SET vacuum_bulk_read_size='64kB';
++
++SELECT count(*) FROM vactst;
++DELETE FROM vactst WHERE i != 0;
++SELECT * FROM vactst;
++VACUUM vactst;
++
++UPDATE vactst SET i = i + 1;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst SELECT * FROM vactst;
++INSERT INTO vactst VALUES (0);
++SELECT count(*) FROM vactst;
++DELETE FROM vactst WHERE i != 0;
++VACUUM vactst;
++
++DELETE FROM vactst;
++SELECT * FROM vactst;
++
++DROP TABLE vactst;
++
++ALTER SYSTEM SET vacuum_bulk_read_size='0kB';
+-- 
+2.34.1
+

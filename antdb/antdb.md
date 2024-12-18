@@ -1,5 +1,5 @@
 ### antdb相关
-基于PG的开源分布式数据库。
+基于PG的开源分布式数据库。但是目前以下开源地址已经访问不到了，也许已经闭源了？
 gitee:  https://gitee.com/adbsql/antdb
 github: https://github.com/ADBSQL/AntDB
 wiki: https://github.com/ADBSQL/AntDB/wiki
