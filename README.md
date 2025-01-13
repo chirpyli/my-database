@@ -53,6 +53,12 @@
 - [Postgres源码分析 —— unnest函数](./postgres/pg-src-analyze-function-unnest.md)
 
 
+#### 存储引擎
+- [PostgreSQL源码分析——缓冲区](./postgres/storage-engine/pg-src-analyze-shared-buffer.md)
+- [PostgreSQL源码分析——数据页校验](./postgres/storage-engine/pg-src-analyze-checksum.md)
+- [PostgreSQL源码分析——外存管理](./postgres/storage-engine/pg-src-analyze-smgr.md)
+- [PostgreSQL源码分析——空闲空间映射表](./postgres/storage-engine/pg-src-analyze-freespacemap.md)
+
 ##### 建表相关
 
 - [Postgres源码分析——CREATE DATABASE](./postgres/pg-src-analyze-create-database.md)
@@ -69,11 +75,7 @@
 - [Postgres源码分析——CAST类型转换](./postgres/pg-src-analyze-cast.md)
 - [Postgres源码分析——除法运算符](./postgres/pg-src-analyze-operator-div.md)
 
-#### 存储引擎
-- [PostgreSQL源码分析——缓冲区](./postgres/pg-src-analyze-shared-buffer.md)
-- [PostgreSQL源码分析——数据页校验](./postgres/pg-src-analyze-checksum.md)
-- [PostgreSQL源码分析——外存管理](./postgres/pg-src-analyze-smgr.md)
-- [PostgreSQL源码分析——空闲空间映射表](./postgres/pg-src-analyze-freespacemap.md)
+
 
 ##### WAL日志相关
 - [Postgres源码分析——CHECKPOINT](./postgres/pg-src-analyze-checkpoint.md)
@@ -104,12 +106,12 @@
 - [Postgres源码分析——日志进程](./postgres/pg-src-analyze-log.md)
 
 #### 插件
-- [PostgreSQL源码分析——pg_stat_statements](./postgres/postgres-extension/pg-src-analyze-pg-stat-statements.md)
-- [PostgreSQL源码分析——auth_delay](./postgres/postgres-extension/pg-src-analyze-auth-delay.md)
-- [PostgreSQL源码分析——auto_explain](./postgres/postgres-extension/pg-src-analyze-auto-explain.md)
-- [PostgreSQL源码分析——pg_buffercache](./postgres/postgres-extension/pg-src-analyze-buffercache.md)
-- [PostgreSQL审计插件pgaudit](./postgres/postgres-extension/pg-src-analyze-pgaudit.md)
-- [PostgreSQL插件之pg_freespacemap](./postgres/postgres-extension/pg-src-analyze-pg-freespacemap.md)
+- [PostgreSQL源码分析——pg_stat_statements](./postgres/extension/pg-src-analyze-pg-stat-statements.md)
+- [PostgreSQL源码分析——auth_delay](./postgres/extension/pg-src-analyze-auth-delay.md)
+- [PostgreSQL源码分析——auto_explain](./postgres/extension/pg-src-analyze-auto-explain.md)
+- [PostgreSQL源码分析——pg_buffercache](./postgres/extension/pg-src-analyze-buffercache.md)
+- [PostgreSQL审计插件pgaudit](./postgres/extension/pg-src-analyze-pgaudit.md)
+- [PostgreSQL插件之pg_freespacemap](./postgres/extension/pg-src-analyze-pg-freespacemap.md)
 
 ### Greenplum
 基于PostgreSQL的MPP分布式数据库。目前已经闭源，但是代码还可以看到。

@@ -1,5 +1,5 @@
-### PostgreSQL源码分析——IndexScan
-这里，我们分析一下索引扫描的过程，以最简单的`select * from t1 where a = 100;`语句为例，分析一下查询的过程。
+### PostgreSQL源码分析——索引扫描
+这里，我们分析一下索引扫描的过程，以最简单的`select * from t1 where a = 100;`语句为例，分析一下索引扫描的过程。
 
 ```sql
 postgres@postgres=# \d t1;
@@ -86,14 +86,7 @@ typedef struct SelectStmt
 
 } SelectStmt;
 
-/*
- * RangeVar - range variable, used in FROM clauses
- *
- * Also used to represent table names in utility statements; there, the alias
- * field is not used, and inh tells whether to apply the operation
- * recursively to child tables.  In some contexts it is also useful to carry
- * a TEMP table indication here.
- */
+/* RangeVar - range variable, used in FROM clauses */
 typedef struct RangeVar
 {
 	NodeTag		type;
@@ -171,7 +164,6 @@ pg_plan_queries
 							else
 							--> make_indexscan
 ```
-
 这里有个函数要重点说明一下，在涉及多表路径规划时，单表路径是最基础的，单表路径可以是顺序扫描、索引扫描、TID扫描等，这个是最底层的。
 ```c++
 /* Build access paths for a plain relation (no subquery, no inheritance) */
@@ -183,17 +175,12 @@ void set_plain_rel_pathlist(PlannerInfo *root, RelOptInfo *rel, RangeTblEntry *r
 	 * it could still have required parameterization due to LATERAL refs in its tlist. */
 	required_outer = rel->lateral_relids;
 
-	/* Consider sequential scan */
 	add_path(rel, create_seqscan_path(root, rel, required_outer, 0));	// 顺序扫描
 
-	/* If appropriate, consider parallel sequential scan */
 	if (rel->consider_parallel && required_outer == NULL)		// 尝试并行顺序扫描
 		create_plain_partial_paths(root, rel);
 
-	/* Consider index scans */
 	create_index_paths(root, rel);			// 索引扫描
-
-	/* Consider TID scans */
 	create_tidscan_paths(root, rel);      // TID扫描
 }
 ```
@@ -306,9 +293,7 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 	bool		index_only_scan;
 	int			indexcol;
 
-	/*
-	 * Check that index supports the desired scan type(s)
-	 */
+	/* Check that index supports the desired scan type(s) */
 	switch (scantype)
 	{
 		case ST_INDEXSCAN:
@@ -446,13 +431,7 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 	}
 
 	// 这里非常重要，检查是否可以进行index-only scan
-	/*
-	 * 3. Check if an index-only scan is possible.  If we're not building
-	 * plain indexscans, this isn't relevant since bitmap scans don't support
-	 * index data retrieval anyway.
-	 */
-	index_only_scan = (scantype != ST_BITMAPSCAN &&
-					   check_index_only(rel, index));
+	index_only_scan = (scantype != ST_BITMAPSCAN && check_index_only(rel, index));
 
 	/*
 	 * 4. Generate an indexscan path if there are relevant restriction clauses

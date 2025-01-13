@@ -90,7 +90,9 @@ vacuum_rel
                     lazy_scan_prune(vacrel, buf, blkno, page, vistest, &prunestate);
                     --> heap_page_prune
 
+                    // 获取页面空闲空间大小
                     Size freespace = PageGetHeapFreeSpace(page);
+                    // 更新FSM
                     RecordPageWithFreeSpace(vacrel->rel, blkno, freespace);
                     --> fsm_set_and_search(rel, addr, slot, new_cat, 0);
                         --> fsm_readbuf(rel, addr, true);
