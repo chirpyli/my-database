@@ -73,6 +73,7 @@
 - [PostgreSQL源码分析——缓冲区](./postgres/pg-src-analyze-shared-buffer.md)
 - [PostgreSQL源码分析——数据页校验](./postgres/pg-src-analyze-checksum.md)
 - [PostgreSQL源码分析——外存管理](./postgres/pg-src-analyze-smgr.md)
+- [PostgreSQL源码分析——空闲空间映射表](./postgres/pg-src-analyze-freespacemap.md)
 
 ##### WAL日志相关
 - [Postgres源码分析——CHECKPOINT](./postgres/pg-src-analyze-checkpoint.md)
@@ -108,6 +109,7 @@
 - [PostgreSQL源码分析——auto_explain](./postgres/postgres-extension/pg-src-analyze-auto-explain.md)
 - [PostgreSQL源码分析——pg_buffercache](./postgres/postgres-extension/pg-src-analyze-buffercache.md)
 - [PostgreSQL审计插件pgaudit](./postgres/postgres-extension/pg-src-analyze-pgaudit.md)
+- [PostgreSQL插件之pg_freespacemap](./postgres/postgres-extension/pg-src-analyze-pg-freespacemap.md)
 
 ### Greenplum
 基于PostgreSQL的MPP分布式数据库。目前已经闭源，但是代码还可以看到。

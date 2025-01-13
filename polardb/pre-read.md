@@ -685,3 +685,5 @@ void polar_mdbulkread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknu
 }
 ```
 
+---
+> 这里额外说一下为什么堆表预读不建议设置的很大，其实原因和PostgreSQL中环形缓冲区大小默认为256KB道理是一样的。顺序扫描使用256KB的环形缓冲区，它足够小，因而能放入L2缓存中，从而使得操作系统缓存到共享缓冲区的页面传输变得高效。

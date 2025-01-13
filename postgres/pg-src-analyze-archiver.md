@@ -7,7 +7,6 @@ PG中有日志归档功能，主要目的就是备份恢复，PITR，为啥要�
 #### 打开日志归档
 在配置文件中配置`archive_mode=on`打开日志归档，启动时会创建归档进程archiver，通过`archive_command`中配置的命令进行归档。
 ```shell
-# - Archiving -
 archive_mode = on               # enables archiving; off, on, or always (change requires restart)
 archive_command = 'cp %p /home/postgres/pgsql/archive/%f'               # command to use to archive a logfile segment
                                 # placeholders: %p = path of file to archive
@@ -17,7 +16,6 @@ archive_timeout = 1800          # force a logfile segment switch after this
                                 # number of seconds; 0 disables
 ```
 
-
 #### 归档进程源码
 我们看一下归档进程的源码，在`src/backend/postmaster/pgarch.c`中：
 ```c++
@@ -26,7 +24,7 @@ PgArchiverMain(void)
 	--> pgarch_ArchiverCopyLoop(); 
 		--> pgarch_readyXlog
 ```
-日志归档的逻辑，主要是什么时候进行归档？核心要点是发生日志段切换时会触发，那我们看一下那些情况会触发日志切换
+日志归档的逻辑，主要是什么时候进行归档？**核心要点是发生日志段切换时会触发**，那我们看一下那些情况会触发日志切换
 - 当WAL日志中的一个日志段（日志文件）已满，需要切换到下一个日志段时，就可以通知archiver进程将这个日志归档。产生日志切换的进程会在通知Postmaster之前先在`pg_wal/archive_status`下生成一个`.ready`文件，这个文件和待归档日志同名。
 - 如果长时间没有归档，触发`archive_timeout`超时，则强制进行日志切换，强制归档
 - 调用`pg_switch_wal()`函数手动触发
@@ -80,8 +78,7 @@ static void pgarch_MainLoop(void)
 static void XLogWrite(XLogwrtRqst WriteRqst, bool flexible)
 {
 	// ...
-			/*
-			 * If we just wrote the whole last page of a logfile segment,
+			/* If we just wrote the whole last page of a logfile segment,
 			 * fsync the segment immediately.  This avoids having to go back
 			 * and re-open prior segments when an fsync request comes along
 			 * later. Doing it here ensures that one and only one backend will
@@ -97,7 +94,6 @@ static void XLogWrite(XLogwrtRqst WriteRqst, bool flexible)
 				issue_xlog_fsync(openLogFile, openLogSegNo);
 
 				// 通知walsender进程发送日志给standby
-				/* signal that we need to wakeup walsenders later */
 				WalSndWakeupRequest();
 
 				LogwrtResult.Flush = LogwrtResult.Write;	/* end of page */
@@ -109,13 +105,10 @@ static void XLogWrite(XLogwrtRqst WriteRqst, bool flexible)
 				XLogCtl->lastSegSwitchTime = (pg_time_t) time(NULL);
 				XLogCtl->lastSegSwitchLSN = LogwrtResult.Flush;
 
-				/*
-				 * Request a checkpoint if we've consumed too much xlog since
+				/* Request a checkpoint if we've consumed too much xlog since
 				 * the last one.  For speed, we first check using the local
 				 * copy of RedoRecPtr, which might be out of date; if it looks
-				 * like a checkpoint is needed, forcibly update RedoRecPtr and
-				 * recheck.
-				 */
+				 * like a checkpoint is needed, forcibly update RedoRecPtr and recheck. */
 				if (IsUnderPostmaster && XLogCheckpointNeeded(openLogSegNo))
 				{
 					(void) GetRedoRecPtr();
@@ -162,7 +155,6 @@ void XLogArchiveNotify(const char *xlog)
 		return;
 	}
 
-	/* Notify archiver that it's got something to do */
 	if (IsUnderPostmaster)
 		PgArchWakeup();		// 唤醒归档进程，进入拷贝日志逻辑
 }
@@ -179,7 +171,6 @@ CheckpointerMain(void)
 ```
 源码如下：
 ```c++
-/* CheckArchiveTimeout -- check for archive_timeout and switch xlog files */
 static void CheckArchiveTimeout(void)
 {
 	pg_time_t	now;
@@ -312,9 +303,7 @@ static bool pgarch_archiveXlog(char *xlog)
 
 	snprintf(pathname, MAXPGPATH, XLOGDIR "/%s", xlog);
 
-	/*
-	 * construct the command to be executed
-	 */
+	/* construct the command to be executed */
 	dp = xlogarchcmd;
 	endp = xlogarchcmd + MAXPGPATH - 1;
 	*endp = '\0';
@@ -540,6 +529,3 @@ bool XLogArchiveCheckDone(const char *xlog)
 postgres@slpc:~/pgsql/pgdata/pg_wal/archive_status$ ls
 000000010000000000000001.done  000000010000000000000002.ready	# .done表示已完成归档， .ready表示可以进行归档
 ```
-
-
-

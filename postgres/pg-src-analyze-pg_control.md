@@ -270,10 +270,6 @@ Latest checkpoint's REDO location:    0/167E598
 Latest checkpoint's REDO WAL file:    000000010000000000000001
 ```
 
-
-
-
-
 我们通过一些命令来加深对此的理解。
 ```sql
 -- 创建插件，用于观测buffer
