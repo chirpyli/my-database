@@ -567,8 +567,15 @@ PortalRun
 							--> table_index_fetch_begin
 								--> heapam_index_fetch_begin
 						--> index_getnext_slot
-							--> index_getnext_tid
-								--> btgettuple
+								// 获取TID
+							--> index_getnext_tid(scan, direction) 
+								--> btgettuple(scan, direction)
+								// 获取TID对应的HeapTuple
+							--> index_fetch_heap(scan, slot)
+								--> table_index_fetch_tuple
+									--> heapam_index_fetch_tuple
+										--> ReleaseAndReadBuffer(hscan->xs_cbuf, hscan->xs_base.rel, ItemPointerGetBlockNumber(tid));
+										--> heap_hot_search_buffer
 PortalDrop
 ```
 
