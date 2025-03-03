@@ -113,6 +113,7 @@
 - [PostgreSQL审计插件pgaudit](./postgres/extension/pg-src-analyze-pgaudit.md)
 - [PostgreSQL插件之pg_freespacemap](./postgres/extension/pg-src-analyze-pg-freespacemap.md)
 - [PostgreSQL数据库插件——pg_visibility](./postgres/extension/pg_visibility.md)
+- [PostgreSQL定时任务插件——pg_cron](./postgres/extension/pg_cron.md)
 
 ### Greenplum
 基于PostgreSQL的MPP分布式数据库。目前已经闭源，但是代码还可以看到。
