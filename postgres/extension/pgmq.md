@@ -288,7 +288,7 @@ PGMQ通过可见性超时确保在特定时间窗口内，每条消息仅被消�
 |消息确认机制| 支持visibility timeout、显式删除| 支持ACK/NACK机制|
 
 
-综合考虑，需要结合业务场景和需求，选择合适的消息队列系统。简单来说，如果业务不是很复杂，业务量不大，且不需要高并发、大规模消息处理的场景，那么pgmq也是一个不错的选择，能够简化技术栈，避免引入独立的消息中间件，减少运维成本，实现降本增效。简单来说就是很多情况下，没有必要非要引入重量级的消息中间件，完全可以用更轻量化的方案实现。
+综合考虑，需要结合业务场景和需求，选择合适的消息队列系统。<u>简单来说，如果业务不是很复杂，业务量不大，不需要高并发、大规模消息处理的场景，那么PGMQ也是一个不错的选择，特别是如果PostgreSQL已经是技术栈的一部分，能够简化技术栈，避免引入独立的消息中间件，减少运维成本，实现降本增效。</u>很多情况下，没有必要引入重量级的消息中间件，完全可以用更轻量化的方案实现。
 
 
 
@@ -299,3 +299,4 @@ PGMQ通过可见性超时确保在特定时间窗口内，每条消息仅被消�
 [PGMQ API文档](https://tembo.io/pgmq/api/sql/functions/)
 [RabbitMQ One broker to queue them all](https://www.rabbitmq.com/)
 [RabbitMQ Tutorials](https://www.rabbitmq.com/tutorials)
+[PostgreSQL轻量级消息队列PGMQ](https://crates.org.cn/crates/pgmq)
