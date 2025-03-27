@@ -19,7 +19,7 @@ CREATE EXTENSION
 ```
 
 #### 创建队列
-可通过`pgmq.create_queue`函数创建队列，每个队列都是一个数据库表，表名是队列名加上前缀'q_'。例如，创建一个名为'my_queue'的队列，则对应的表名为'q_my_queue'。
+可通过`pgmq.create_queue`函数创建队列，每个队列都是一个数据库表，表名是队列名加上前缀`q_`。例如，创建一个名为`my_queue`的队列，则对应的表名为`q_my_queue`。
 ```sql
 postgres=# select pgmq.create_queue('my_queue');
  pgmq.create_queue 
@@ -45,7 +45,7 @@ Indexes:
 ```
 
 #### 发送消息
-可通过`pgmq.send_message`函数发送消息，消息会保存在队列中，并返回消息ID。例如，向'my_queue'队列发送一条消息'hello world'。
+可通过`pgmq.send_message`函数发送消息，消息会保存在队列中，并返回消息ID。例如，向`my_queue`队列发送一条消息`hello world`。
 ```sql
 postgres=# select pgmq.send_message('my_queue', 'hello world');
  pgmq.send_message 
@@ -300,3 +300,4 @@ PGMQ通过可见性超时确保在特定时间窗口内，每条消息仅被消�
 [RabbitMQ One broker to queue them all](https://www.rabbitmq.com/)
 [RabbitMQ Tutorials](https://www.rabbitmq.com/tutorials)
 [PostgreSQL轻量级消息队列PGMQ](https://crates.org.cn/crates/pgmq)
+[Redis与RabbitMQ作为消息队列的比较](http://www.pgsql.tech/article_104_10000024)

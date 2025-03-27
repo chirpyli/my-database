@@ -114,6 +114,10 @@
 - [PostgreSQL插件之pg_freespacemap](./postgres/extension/pg-src-analyze-pg-freespacemap.md)
 - [PostgreSQL数据库插件——pg_visibility](./postgres/extension/pg_visibility.md)
 - [PostgreSQL定时任务插件——pg_cron](./postgres/extension/pg_cron.md)
+- [PostgreSQL消息队列拓展——PGMQ](./postgres/extension/pgmq.md)
+- [PostgreSQL消息队列拓展——PGQ](./postgres/extension/pgq.md)
+- [PostgreSQL分区管理拓展——pg_partman](./postgres/extension/pg_partman.md)
+- [PostgreSQL消息队列拓展PGMQ实现原理分析](./postgres/extension/pgmq-analyze.md)
 
 ### Greenplum
 基于PostgreSQL的MPP分布式数据库。目前已经闭源，但是代码还可以看到。
