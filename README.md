@@ -118,6 +118,7 @@
 - [PostgreSQL消息队列拓展——PGQ](./postgres/extension/pgq.md)
 - [PostgreSQL分区管理拓展——pg_partman](./postgres/extension/pg_partman.md)
 - [PostgreSQL消息队列拓展PGMQ实现原理分析](./postgres/extension/pgmq-analyze.md)
+- [PostgreSQL消息队列拓展PGQ实现原理分析](./postgres/extension/pgq-analyze.md)
 
 ### Greenplum
 基于PostgreSQL的MPP分布式数据库。目前已经闭源，但是代码还可以看到。

@@ -4,7 +4,7 @@
 
 ### 数据库实现消息队列的初步原理
 
-数据库实现消息队列，并不是像RabbitMQ一样，实现了AMQP协议，而是通过数据库机制来实现类似消息队列的功能。对外提供的接口是SQL接口。 <u>数据库实现消息队列，是通过表来实现队列。</u> 一个队列就是一张表，客户端发送消息到队列，实际上就是向表中插入了一条数据。消费者读消息，就是读这张抽象为队列的表，消费消息实际上就是从被抽象为队列的表中删除消息。为了方便用户使用，封装了一些API来操作队列，与RabbitMQ不同的是，这里提供的是纯SQL接口，用户可以直接使用SQL来操作队列，比如发送消息、消费消息等。
+数据库实现消息队列，并不是像RabbitMQ一样，实现了AMQP协议，而是通过数据库机制来实现类似消息队列的功能。对外提供的接口是SQL接口。 <u>数据库实现消息队列，是通过表来实现队列。</u> 一个队列就是一张表，客户端发送消息到队列，实际上就是向表中插入了一条数据。消费者读消息，就是读这张抽象为队列的表，消费消息实际上就是从被抽象为队列的表中删除消息。为了方便用户使用，除了提供SQL接口的方式，还封装了一些API来操作队列，例如[Rust库pgmq](https://crates.org.cn/crates/pgmq)，[Python库tembo-pgmq-python](https://tembo.io/blog/pgmq-with-python)等。
 
 
 ### 消息定义
@@ -207,6 +207,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 ```
+
 #### 支持批量发送消息
 支持批量发送消息，其实现如下：
 ```sql
@@ -236,6 +237,9 @@ $$ LANGUAGE plpgsql;
 
 #### 怎么确定消息是否发生成功呢？
 返回消息ID则消息发送成功，由事务保证，如果消息发送失败，事务会回滚，所以消息不会插入到队列表中。不支持消息重试，需要业务自己实现。
+
+#### 延迟队列
+支持延迟队列，发送消息时，可设置延迟时间，延迟时间到达后，消息变为可见，可以被消费者读取。
 
 ### 读消息
 
@@ -599,3 +603,88 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 ```
+
+### Rust客户端
+为了方便用户的使用，除了提供SQL接口，还提供了Rust客户端，用户可以方便的使用Rust语言来操作消息队列。提供了两种客户端，一种是`pgmq::PGMQueueExt`，这种是封装了PGMQ扩展提供的SQL接口，另一种是`pgmq::PGMQueue`，这种是无需安装PGMQ扩展，直接可连接PostgreSQL数据库使用，相当于`pgmq::PGMQueue`根据PGMQ的实现原理，不通过plpgsql来实现，而是自己用SQL来实现。用户可以根据自己的需求选择合适的客户端。
+
+具体的代码这里不再分析，只以创建队列和读队列为例，这里都是异步操作，需要使用`tokio`运行时来执行，示例如下：
+```rust
+/// Main controller for interacting with a managed by the PGMQ Postgres extension.
+#[derive(Clone, Debug)]
+pub struct PGMQueueExt {
+    pub url: String,
+    pub connection: Pool<Postgres>,
+}
+
+impl PGMQueueExt {
+    pub async fn create_with_cxn<'c, E: sqlx::Executor<'c, Database = Postgres>>(
+        &self,
+        queue_name: &str,
+        executor: E,
+    ) -> Result<bool, PgmqError> {
+        check_input(queue_name)?;
+        sqlx::query!("SELECT * from pgmq.create($1::text);", queue_name)
+            .execute(executor)
+            .await?;
+        Ok(true)
+    }
+    /// Errors when there is any database error and Ok(false) when the queue already exists.
+    pub async fn create(&self, queue_name: &str) -> Result<bool, PgmqError> {
+        self.create_with_cxn(queue_name, &self.connection).await?;
+        Ok(true)
+    }
+
+        pub async fn read_with_cxn<
+        'c,
+        E: sqlx::Executor<'c, Database = Postgres>,
+        T: for<'de> Deserialize<'de>,
+    >(
+        &self,
+        queue_name: &str,
+        vt: i32,
+        executor: E,
+    ) -> Result<Option<Message<T>>, PgmqError> {
+        check_input(queue_name)?;
+        let row = sqlx::query!(
+            "SELECT * from pgmq.read($1::text, $2, $3)",
+            queue_name,
+            vt,
+            1
+        )
+        .fetch_optional(executor)
+        .await?;
+        match row {
+            Some(row) => {
+                // happy path - successfully read a message
+                let raw_msg = row.message.expect("no message");
+                let parsed_msg = serde_json::from_value::<T>(raw_msg)?;
+                Ok(Some(Message {
+                    msg_id: row.msg_id.expect("msg_id missing from queue table"),
+                    vt: row.vt.expect("vt missing from queue table"),
+                    read_ct: row.read_ct.expect("read_ct missing from queue table"),
+                    enqueued_at: row
+                        .enqueued_at
+                        .expect("enqueued_at missing from queue table"),
+                    message: parsed_msg,
+                }))
+            }
+            None => {
+                // no message found
+                Ok(None)
+            }
+        }
+    }
+
+    pub async fn read<T: for<'de> Deserialize<'de>>(
+        &self,
+        queue_name: &str,
+        vt: i32,
+    ) -> Result<Option<Message<T>>, PgmqError> {
+        self.read_with_cxn(queue_name, vt, &self.connection).await
+    }
+}
+```
+
+---
+参考文档：
+[Postgres消息队列](https://www.dongaigc.com/p/tembo-io/pgmq)
