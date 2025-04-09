@@ -86,7 +86,7 @@
 - [Postgres源码分析——WAL日志清理](./postgres/pg-src-analyze-wal-clean.md)
 - [PostgreSQL源码分析 —— pg_control](./postgres/pg-src-analyze-pg_control.md)
 - [PostgreSQL备机回放流程](./postgres/pg-src-analyze-standby.md)
-
+- [PostgreSQL源码分析——SLRU缓冲池](./postgres/pg-src-analyze-slru.md)
 
 #### 后台进程
 - [Postgres源码分析——bgwriter](./postgres/pg-src-analyze-bgwriter.md)
@@ -104,6 +104,9 @@
 - [Postgres源码分析——initdb](./postgres/pg-src-analyze-initdb.md)
 - [Postgres源码分析——psql](./postgres/pg-src-analyze-psql.md)
 - [Postgres源码分析——日志进程](./postgres/pg-src-analyze-log.md)
+
+#### 异步通知
+- [Postgres源码分析——异步通知](./postgres/pg-listen-notify.md)
 
 #### 插件
 - [PostgreSQL源码分析——pg_stat_statements](./postgres/extension/pg-src-analyze-pg-stat-statements.md)
@@ -132,6 +135,9 @@ PostgreSQL的插件，开源分布式数据库。
 ### openGauss
 华为开源的数据库，基于PostgreSQL。
 - [openGauss支持堆表预读](./opengauss/opengauss-heap-table-pre-read.md)
+
+### openHalo
+- [openHalo初识](./openhalo/first-use-openHalo.md)
 
 ### MySQL
 

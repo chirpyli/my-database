@@ -722,3 +722,4 @@ asyncQueueProcessPageEntries(volatile QueuePosition *current,
 [LISTEN](http://postgres.cn/docs/current/sql-listen.html)
 [NOTIFY](http://postgres.cn/docs/current/sql-notify.html)
 [34.9. 异步通知](http://www.postgres.cn/docs/current/libpq-notify.html)
+[PgSQL · 功能分析 · Listen/Notify 功能](https://developer.aliyun.com/article/50903)

@@ -38,17 +38,16 @@ typedef struct SlruSharedData
 	char	  **page_buffer;      // 缓冲池中的页面数组
 	SlruPageStatus *page_status;  // 页面状态
 	bool	   *page_dirty;       // 页面是否脏
-	int		   *page_number;      // 页面编号
+	int		   *page_number;      // 每个缓存页面对应的磁盘页面编号
 	int		   *page_lru_count;   // 页面LRU计数
 	LWLockPadded *buffer_locks;
 
 	/*
 	 * Optional array of WAL flush LSNs associated with entries in the SLRU
-	 * pages.  If not zero/NULL, we must flush WAL before writing pages (true
-	 * for pg_xact, false for multixact, pg_subtrans, pg_notify).  
+	 * pages.  If not zero/NULL, we must flush WAL before writing pages 
 	 */
-	XLogRecPtr *group_lsn;
-	int			lsn_groups_per_page;
+	XLogRecPtr *group_lsn;  // 用于Clog中，multixact, pg_subtrans, pg_notify为NULL
+	int			lsn_groups_per_page; // 每个缓存页面对应多少个Group LSN
 
 	/*
 	 * We mark a page "most recently used" by setting
@@ -316,7 +315,7 @@ int SimpleLruZeroPage(SlruCtl ctl, int pageno)
  * 选择最合适的页面槽位，返回页面槽位号，选择规则如下：
  * 1. 如果当前页已存在在槽位中，则直接返回对应的槽位号
  * 2. 如果当前页面槽位为空，则直接返回对应的槽位号
- * 3. 如果当前页面槽位不为空，则执行LRU算法进行替换
+ * 3. 如果当前页面槽位不为空，则执行LRU算法进行替换，淘汰那个cur_lru_count-page_lru_count最大的页面
  */
 static int SlruSelectLRUPage(SlruCtl ctl, int pageno)
 {
@@ -351,8 +350,7 @@ static int SlruSelectLRUPage(SlruCtl ctl, int pageno)
 		 * other choice: a read-busy slot will not be least recently used once
 		 * the read finishes, and waiting for an I/O on a write-busy slot is
 		 * inferior to just picking some other slot.  Testing shows the slot
-		 * we pick instead will often be clean, allowing us to begin a read at
-		 * once.
+		 * we pick instead will often be clean, allowing us to begin a read at once.
 		 */
 		cur_count = (shared->cur_lru_count)++;
 		for (slotno = 0; slotno < shared->num_slots; slotno++) // 遍历所有页面槽位
@@ -362,8 +360,8 @@ static int SlruSelectLRUPage(SlruCtl ctl, int pageno)
             // 如果当前页面槽位为空，则直接返回对应的槽位号
 			if (shared->page_status[slotno] == SLRU_PAGE_EMPTY)
 				return slotno;
-			this_delta = cur_count - shared->page_lru_count[slotno];
-			if (this_delta < 0)
+			this_delta = cur_count - shared->page_lru_count[slotno]; 
+			if (this_delta < 0) // 发生了wrapped around, int overflow
 			{
 				/*
 				 * Clean up in case shared updates have caused cur_count
@@ -373,7 +371,7 @@ static int SlruSelectLRUPage(SlruCtl ctl, int pageno)
 				 * wrapped-around counts.
 				 */
 				shared->page_lru_count[slotno] = cur_count;
-				this_delta = 0;
+				this_delta = 0; 
 			}
 			this_page_number = shared->page_number[slotno];
 			if (this_page_number == shared->latest_page_number) // 如果当前页面是最新页面，则跳过，避免将最新页面不必要的淘汰
@@ -455,13 +453,11 @@ static bool SlruPhysicalWritePage(SlruCtl ctl, int pageno, int slotno, SlruWrite
 	 */
 	if (shared->group_lsn != NULL)
 	{
-		/*
-		 * We must determine the largest async-commit LSN for the page. This
+		/* We must determine the largest async-commit LSN for the page. This
 		 * is a bit tedious, but since this entire function is a slow path
 		 * anyway, it seems better to do this here than to maintain a per-page
 		 * LSN variable (which'd need an extra comparison in the
-		 * transaction-commit path).
-		 */
+		 * transaction-commit path). */
 		XLogRecPtr	max_lsn;
 		int			lsnindex,
 					lsnoff;
@@ -478,12 +474,10 @@ static bool SlruPhysicalWritePage(SlruCtl ctl, int pageno, int slotno, SlruWrite
 
 		if (!XLogRecPtrIsInvalid(max_lsn))
 		{
-			/*
-			 * As noted above, elog(ERROR) is not acceptable here, so if
+			/* As noted above, elog(ERROR) is not acceptable here, so if
 			 * XLogFlush were to fail, we must PANIC.  This isn't much of a
 			 * restriction because XLogFlush is just about all critical
-			 * section anyway, but let's make sure.
-			 */
+			 * section anyway, but let's make sure. */
 			START_CRIT_SECTION();
 			XLogFlush(max_lsn);
 			END_CRIT_SECTION();
@@ -505,23 +499,6 @@ static bool SlruPhysicalWritePage(SlruCtl ctl, int pageno, int slotno, SlruWrite
 
 	if (fd < 0)
 	{
-		/*
-		 * If the file doesn't already exist, we should create it.  It is
-		 * possible for this to need to happen when writing a page that's not
-		 * first in its segment; we assume the OS can cope with that. (Note:
-		 * it might seem that it'd be okay to create files only when
-		 * SimpleLruZeroPage is called for the first page of a segment.
-		 * However, if after a crash and restart the REDO logic elects to
-		 * replay the log from a checkpoint before the latest one, then it's
-		 * possible that we will get commands to set transaction status of
-		 * transactions that have already been truncated from the commit log.
-		 * Easiest way to deal with that is to accept references to
-		 * nonexistent files here and in SlruPhysicalReadPage.)
-		 *
-		 * Note: it is possible for more than one backend to be executing this
-		 * code simultaneously for different pages of the same file. Hence,
-		 * don't use O_EXCL or O_TRUNC or anything like that.
-		 */
 		SlruFileName(ctl, path, segno); // 构造文件名
 		fd = OpenTransientFile(path, O_RDWR | O_CREAT | PG_BINARY); // 创建临时文件
 		if (fd < 0)
@@ -585,10 +562,9 @@ static bool SlruPhysicalWritePage(SlruCtl ctl, int pageno, int slotno, SlruWrite
 		}
 	}
 
-	/* Close file, unless part of flush request. */
 	if (!fdata)
 	{
-		if (CloseTransientFile(fd) != 0)
+		if (CloseTransientFile(fd) != 0)  // 关闭文件
 		{
 			slru_errcause = SLRU_CLOSE_FAILED;
 			slru_errno = errno;
@@ -640,11 +616,6 @@ int SimpleLruReadPage(SlruCtl ctl, int pageno, bool write_ok, TransactionId xid)
 
 			return slotno;
 		}
-
-		/* We found no match; assert we selected a freeable slot */
-		Assert(shared->page_status[slotno] == SLRU_PAGE_EMPTY ||
-			   (shared->page_status[slotno] == SLRU_PAGE_VALID &&
-				!shared->page_dirty[slotno]));
 
 		/* Mark the slot read-busy */
 		shared->page_number[slotno] = pageno;
