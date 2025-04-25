@@ -598,7 +598,7 @@ main(int argc, char *argv[])
             --> BackendInitialize(port);
 				--> pq_init();   // 初始化libpq
 					--> FeBeWaitSet = CreateWaitEventSet(TopMemoryContext, 3); // 创建一个WaitEventSet，用于等待事件
-					--> AddWaitEventToSet(FeBeWaitSet, WL_SOCKET_WRITEABLE, MyProcPort->sock, NULL, NULL);  // 添加WL_SOCKET_WRITEABLE事件到WaitEventSet中，接收客户端发送来的消息
+					--> AddWaitEventToSet(FeBeWaitSet, WL_SOCKET_WRITEABLE, MyProcPort->sock, NULL, NULL);  // 添加WL_SOCKET_WRITEABLE事件到WaitEventSet中，套接字可写事件
 					--> AddWaitEventToSet(FeBeWaitSet, WL_LATCH_SET, PGINVALID_SOCKET, MyLatch, NULL); // 添加WL_LATCH_SET事件到WaitEventSet中，用于等待本地Latch
 					--> AddWaitEventToSet(FeBeWaitSet, WL_POSTMASTER_DEATH, PGINVALID_SOCKET, NULL, NULL);  // 添加postmaster进程终止事件
             --> BackendRun(port);

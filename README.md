@@ -142,6 +142,7 @@ PostgreSQL的插件，开源分布式数据库。
 
 ### openHalo
 - [openHalo初识](./openhalo/first-use-openHalo.md)
+- [openHalo的启动流程](./openhalo/openhalo-start.md)
 
 ### MySQL
 
