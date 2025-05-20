@@ -153,6 +153,11 @@ PostgreSQL的插件，开源分布式数据库。
 - [leveldb工作原理](./leveldb/leveldb.md)
 - [leveldb学习笔记](./leveldb/leveldb学习笔记1.md)
 
+### Redis
+- [redis基础](./redis/redis.md)
+- [redis功能](./redis/redis-functions.md)
+- [redis如何执行一条命令](./redis/how-to-exec-redis-command.md)
+
 ### TiDB
 - [单机部署Tikv](./tidb/单机部署Tikv.md)
 
