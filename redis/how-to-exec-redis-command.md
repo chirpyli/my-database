@@ -24,6 +24,7 @@ main(int argc, char **argv)
                 --> listen(s, backlog)
         --> anetNonBlock(NULL,sfd->fd[sfd->count])
     --> 初始化默认的16个数据库
+    --> aeCreateTimeEvent(server.el, 1, serverCron, NULL, NULL)  // 创建定时任务，处理众多后台任务，比如清理过期key,写AOF日志等。
     --> createSocketAcceptHandler(&server.ipfd, acceptTcpHandler) // 设置新客户端连接处理函数
     --> aeCreateFileEvent(server.el, server.module_blocked_pipe[0], AE_READABLE,
         moduleBlockedClientPipeReadable,NULL)
@@ -33,7 +34,9 @@ main(int argc, char **argv)
 --> aeMain(server.el);
     while (!eventLoop->stop)
         aeProcessEvents(eventLoop, AE_ALL_EVENTS | AE_CALL_BEFORE_SLEEP | AE_CALL_AFTER_SLEEP);
+        --> eventLoop->beforesleep(eventLoop);  // 在进入事件循环之前调用
         --> aeApiPoll(eventLoop, tvp)
+        --> eventLoop->aftersleep(eventLoop);  // 在进入事件循环之后调用
 --> aeDeleteEventLoop(server.el);
 ```
 redis服务端会调用`aeApiPoll`函数等待事件，当事件发生时，会调用`aeApiPoll`函数，该函数会调用`epoll_wait`函数，该函数会阻塞当前线程，直到有事件发生。调用栈如下：
@@ -80,6 +83,7 @@ setCommand(client *c)
                 --> dictAddRaw(d,key,NULL);
                 --> dictSetVal(d, entry, val);
 ```
+理解set是怎么执行的，其实也需要理解redis的宏观框架，可以参考这篇文章[从宏观上看Redis数据结构](https://geekdaxue.co/read/yinhuidong@redis/nzn3h4)。写的非常好。
 
 ### RESP协议
 

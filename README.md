@@ -157,6 +157,9 @@ PostgreSQL的插件，开源分布式数据库。
 - [redis基础](./redis/redis.md)
 - [redis功能](./redis/redis-functions.md)
 - [redis如何执行一条命令](./redis/how-to-exec-redis-command.md)
+- [Redis中的持久化机制——AOF篇](./redis/redis-aof.md)
+- [Redis中的持久化机制——RDB篇](./redis/redis-rdb.md)
+- [Redis事务](./redis/redis-transaction.md)
 
 ### TiDB
 - [单机部署Tikv](./tidb/单机部署Tikv.md)
