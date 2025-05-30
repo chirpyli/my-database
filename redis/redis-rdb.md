@@ -505,3 +505,11 @@ robj *rdbLoadObject(int rdbtype, rio *rdb, sds key, int *error) {
 
 ### 总结
 Redis提供了两种持久化方式，RDB以及AOF，这两者往往需要结合使用，同时在集群复制场景也会使用RDB以及AOF进行节点数据同步。用户可根据具体场景选择适合的持久化方式。除了以上两种方式，还可以选择混合持久化，也就是综合RDB和AOF的优点，在AOF重写时，先fork子进程将当前redis内存快照写RDB格式数据作为AOF文件上半部分，同时主进程记录重写AOF文件后的所有AOF命令，当RDB格式数据写入AOF文件的上半部分完成时，再将主进程记录的AOF命令写入AOF文件的下半部分，最后替换旧的AOF文件，完成AOF重写。
+
+
+---
+
+参考文档：
+[全面解析 Redis 持久化：RDB、AOF与混合持久化](https://www.cnblogs.com/xiaokang-coding/articles/18531836)
+[Redis[十七]持久化机制](https://geekdaxue.co/read/yinhuidong@redis/zcqomb)
+[Redis持久化机制](https://redisbook.readthedocs.io/en/latest/internal/rdb.html)
