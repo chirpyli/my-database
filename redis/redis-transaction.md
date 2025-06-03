@@ -2,7 +2,7 @@
 
 客户端通常会执行一系列命令来对数据对象进行一组相关的更改。然而，另一个客户端也可能在此期间使用类似的命令修改相同的数据对象。这种情况可能导致数据损坏或不一致。为了解决这个问题，redis引入了事务功能。使用事务将来自客户端的多个命令作为一个单元组在一起。事务中的命令保证按顺序执行，不受其他客户端命令的干扰。
 
-这里怎么理解呢？为什么redis中事务的实现要比PostgreSQL中要简单很多？因为redis中关键处理是单线程的，保证只有一个客户端的命令在执行，执行完当前客户端的命令后，才能执行下一个客户端的命令。而PostgreSQL是多进程架构，多个进程并发执行，其事务实现要复杂很多，事务的保证要强很多。Redis只实现了有限的事务功能，只保证事务内命令按顺序执行，不被其他客户端命令干扰，事务内命令执行失败则无法进行回滚，继续执行下一个命令。对此，需要客户端对事务失败去做相应的处理。
+这里怎么理解呢？为什么redis中事务的实现要比PostgreSQL中要简单很多？因为redis中关键处理是单线程的，保证只有一个客户端的命令在执行，执行完当前客户端的命令后，才能执行下一个客户端的命令。而PostgreSQL是多进程架构，多个进程并发执行，其事务实现要复杂很多。Redis只实现了有限的事务功能，只保证事务内命令按顺序执行，不被其他客户端命令干扰，事务内命令执行失败则无法进行回滚（PostgreSQL中事务失败则回滚），继续执行下一个命令。对此，需要客户端对事务失败去做相应的处理。
 
 
 ### Redis事务实现
@@ -46,15 +46,28 @@ OK
 ```
 如果在事务执行过程中发生错误，redis将继续执行事务队列中的命令。
 ```sh
-
+127.0.0.1:6379> multi
+OK
+127.0.0.1:6379(TX)> set k1 v1
+QUEUED
+127.0.0.1:6379(TX)> incr k1   # incr命令只能对数字进行操作，如果对字符串进行操作会报错
+QUEUED
+127.0.0.1:6379(TX)> set k2 1  # 事务中命令执行失败，不影响后续命令执行
+QUEUED
+127.0.0.1:6379(TX)> get k2
+QUEUED
+127.0.0.1:6379(TX)> exec
+1) OK
+2) (error) ERR value is not an integer or out of range
+3) OK
+4) "1"
 ```
-
-
 
 Redis事务的执行过程如下：
 
-1. 客户端发送MULTI命令给Redis服务器，Redis服务器将客户端的命令放入一个队列中，并返回一个OK响应给客户端。
-
+1. 客户端发送`MULTI`命令给Redis服务器，Redis服务端将该客户端client标识为`CLIENT_MULTI`状态，表示客户端处于事务模式，并返回一个`OK`响应给客户端。
+2. 客户端发送命令给Redis服务器，Redis服务器将命令通过`queueMultiCommand(c)`放入队列`c->mstate`中，并返回一个`QUEUED`响应给客户端。
+3. 客户端发送`EXEC`命令给Redis服务器，Redis服务器执行队列中的命令，并返回命令的执行结果给客户端。
 
 
 ### 源码分析
@@ -78,9 +91,9 @@ typedef struct multiCmd {
     robj **argv;       // 参数
     int argc;          // 参数数量
     struct redisCommand *cmd;      // 命令指针
-} multiCmd;
+} multiCmd;  // 该结构用来保存单个排队的命令
 ```
-事务状态，一般对每个客户端来说，都需要保存所有事务的状态，需要一个事务队列去保存：
+事务状态，一般对每个客户端来说，都需要保存所有事务的状态，需要一个事务队列去保存，`commands`数组存储所有排队的命令，`count`记录命令的数量。
 ```c++
 typedef struct multiState {
     // 事务队列，FIFO 顺序
@@ -154,12 +167,12 @@ void queueMultiCommand(client *c) {
     memcpy(mc->argv,c->argv,sizeof(robj*)*c->argc);
     for (j = 0; j < c->argc; j++)
         incrRefCount(mc->argv[j]);
-    c->mstate.count++;
+    c->mstate.count++;   // 增加命令数量
     c->mstate.cmd_flags |= c->cmd->flags;
     c->mstate.cmd_inv_flags |= ~c->cmd->flags;
 }
 ```
-我们知道redis中`multi`命令开启事务，我们看一下`multi`命令的实现，设置该客户端的状态为`CLIENT_MULTI`，返回客户端`OK`。
+我们知道redis中`multi`命令开启事务，我们看一下`multi`命令的实现，设置该客户端的状态为`CLIENT_MULTI`，表示进入事务模式，返回客户端`OK`。
 ```c++
 void multiCommand(client *c) {
     if (c->flags & CLIENT_MULTI) {
@@ -301,38 +314,141 @@ void execCommand(client *c) {
 }
 ```
 
+如果是`DISCARD`命令，则调用调用`discardTransaction`函数，清理事务状态，并返回`OK`。
+```c++
+void discardCommand(client *c) {
+    if (!(c->flags & CLIENT_MULTI)) {
+        addReplyError(c,"DISCARD without MULTI");
+        return;
+    }
+    discardTransaction(c);
+    addReply(c,shared.ok);
+}
 
-
-
-对WATCH命令的实现：
-```c
-typedef struct watchedKey {
-    robj *key;          // 被监视的键
-    redisDb *db;        // 键所在的数据库
-} watchedKey;
+void discardTransaction(client *c) {
+    freeClientMultiState(c);
+    initClientMultiState(c);
+    c->flags &= ~(CLIENT_MULTI|CLIENT_DIRTY_CAS|CLIENT_DIRTY_EXEC);
+    unwatchAllKeys(c);  // 取消所有的watch键
+}
 ```
 
+### WATCH机制实现
+Redis事务支持乐观锁，通过`WATCH`命令实现，每个客户端维护一个`watched_keys`列表来记录哪些键被watch了。也就是当前客户端关注的哪些键被`WATCH`了。
+```c++
+typedef struct client {
+    list *watched_keys;     /* Keys WATCHED for MULTI/EXEC CAS */
+    // ...
+} client;
+```
+另一个是需要知道当一个被`WATCH`的键被修改时，需要通知哪些客户端，Redis通过`watched_keys`字典来实现，键是被`WATCH`的键，值是所有监视该键的客户端列表。
+```c++
+typedef struct redisDb {
+    dict *watched_keys;    /* Keys WATCHED for MULTI/EXEC CAS */
+    // ...
+} redisDb;
+```
 
+当客户端执行`WATCH`命令时，将键通过`watchCommand->watchForKey`加入到`watched_keys`列表中。
+```c++
+void watchCommand(client *c) {
+    int j;
 
+    if (c->flags & CLIENT_MULTI) {
+        addReplyError(c,"WATCH inside MULTI is not allowed");
+        return;
+    }
+    for (j = 1; j < c->argc; j++)
+        watchForKey(c,c->argv[j]);
+    addReply(c,shared.ok);
+}
+
+/* Watch for the specified key */
+void watchForKey(client *c, robj *key) {
+    list *clients = NULL;
+    listIter li;
+    listNode *ln;
+    watchedKey *wk;
+
+    // 该键已经watch，则返回
+    listRewind(c->watched_keys,&li);
+    while((ln = listNext(&li))) {
+        wk = listNodeValue(ln);
+        if (wk->db == c->db && equalStringObjects(key,wk->key))
+            return; /* Key already watched */
+    }
+    
+    // 该键没有被watch，
+    // 1. 在c->db数据库的watched_keys字典中建立键到客户端的映射关系
+    // 2. 加入到watched_keys列表中
+    clients = dictFetchValue(c->db->watched_keys,key);
+    if (!clients) {
+        clients = listCreate();
+        dictAdd(c->db->watched_keys,key,clients);// 键：被监视的键，值：链表，保存所有监视该键的客户端
+        incrRefCount(key);
+    }
+    listAddNodeTail(clients,c);
+    /* Add the new key to the list of keys watched by this client */
+    wk = zmalloc(sizeof(*wk));
+    wk->key = key;
+    wk->db = c->db;
+    incrRefCount(key);
+    listAddNodeTail(c->watched_keys,wk);
+}
+```
+
+当键被修改时，会调用`signalModifiedKey`函数，进而`touchWatchedKey`函数会被调用，它会标记所有监视该键的客户端为`CLIENT_DIRTY_CAS`状态，这样在`EXEC`时就会检测到冲突并中止事务。
+```c++
+void touchWatchedKey(redisDb *db, robj *key) {
+    list *clients;
+    listIter li;
+    listNode *ln;
+
+    if (dictSize(db->watched_keys) == 0) return;
+    clients = dictFetchValue(db->watched_keys, key);
+    if (!clients) return;
+
+    /* Mark all the clients watching this key as CLIENT_DIRTY_CAS */
+    /* Check if we are already watching for this key */
+    listRewind(clients,&li);
+    while((ln = listNext(&li))) {
+        client *c = listNodeValue(ln);
+
+        c->flags |= CLIENT_DIRTY_CAS;
+    }
+}
+```
+我们回看`execCommand`函数,当检测到`CLIENT_DIRTY_CAS`标识时，会终止事务。
+```c++
+    /* Check if we need to abort the EXEC because:
+     * 检查是否需要终止事务：
+     * 1) Some WATCHed key was touched.
+     *    某些被监视的键被修改了
+     * 2) There was a previous error while queueing commands.
+     *     命令在入队列时发生错误
+     * A failed EXEC in the first case returns a multi bulk nil object
+     * (technically it is not an error but a special behavior), while
+     * in the second an EXECABORT error is returned. 
+     *  第一种情况 返回空数组，表示事务因监视的键被修改而失败
+     *  第二种情况 返回错误 EXECABORT
+     * */
+    if (c->flags & (CLIENT_DIRTY_CAS | CLIENT_DIRTY_EXEC)) {
+        if (c->flags & CLIENT_DIRTY_EXEC) {
+            addReplyErrorObject(c, shared.execaborterr); // 返回错误信息
+        } else {
+            addReply(c, shared.nullarray[c->resp]); // 返回空数组
+        }
+
+        discardTransaction(c);  // 终止事务
+        return;
+    }
+```
+
+至此，Redis事务的基本原理就分析完了。
+
+### 总结
+Redis的事务实现相对简单而有效，不支持PostgreSQL数据库的回滚机制，在使用时需要注意事务失败时该如何处理。如果Redis需要支持事务回滚，那么会变得很复杂，需要增加undo日志，而日志都是需要持久化存储的，会影响Redis的性能，同时redis的实现会变得很复杂，还有就是redis需要这个功能吗？
 
 参考文档：
 [Redis 事务的工作原理](https://redis.ac.cn/docs/latest/develop/interact/transactions/)
 [redis源码分析](https://geekdaxue.co/read/yinhuidong@redis/nzn3h4)
-
----
-
-
-
----
-
----
-
-iLog 研发人员投入反馈系统  工时统计，日报
-
-iSoft软件管理平台 项目管理 
-
-项目的背景、项目规模、发起单位、目的、项目内容、组织结构、项目周期、交付的成果
-
-
-当前信息安全领域面临越来越多的挑战，数据泄露，网络攻击事件频发，人们对数据安全的重视程度也在不断提高，为了提升数据安全性，提高企业竞争力，我司决定研发一款安全数据库管理系统，投资预算为800万，项目周期为1年。公司委派我为项目经理，负责整个项目的实施，项目核心组织包括我司数据库研发部，测试部，产品部。交付成果为一款安全集中式关系型数据库管理系统。该安全数据库系统基于开源数据库PostgreSQL开发，在原有PostgrSQL集中式关系型数据库基础上，对数据库安全性进行了全面的增强，在安全审计、访问控制、权限系统、数据库加密、资源管理等方面进行了全面的增强，
-
