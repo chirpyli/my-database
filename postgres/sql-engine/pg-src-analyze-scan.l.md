@@ -1,5 +1,6 @@
-### Postgresql中scan.l源码分析
-
+### PostgreSQL中scan.l源码分析
+`scan.l` 是 PostgreSQL SQL 解析器的词法分析器源码，基于 Flex（lex）工具生成。
+`scan.l` 是 PostgreSQL SQL 解析的第一步，负责将输入 SQL 文本分割成 token，处理字符串、数字、关键字、注释、转义等各种 SQL 语法细节，并为后续的语法分析（Bison 生成的 `gram.c`）提供输入。
 ```c++
 
 // 定义部分， %top{ ... }，%{ ... %}，内容都是C代码，并将代码照搬到生成的C文件中，%top{ ... }是将其中的代码拷贝到scan.c文件中的顶部

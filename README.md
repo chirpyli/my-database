@@ -10,10 +10,6 @@
 
 ## 数据库系统原理篇
 
-### SQL解析器
-- [词法分析与flex](./postgres/词法分析与flex.md)
-- [SQL解析器](./postgres/SQL解析器.md)
-
 ### 查询优化器
 
 - [逻辑优化——常量表达式化简](./query-optimizer/simplify_const_expression.md)
@@ -29,9 +25,15 @@
 
 #### SQL引擎
 
+##### 解析器
+- [词法分析与flex](./postgres/sql-engine/词法分析与flex.md)
+- [SQL解析器](./postgres/sql-engine/sql-parser.md)
 - [PostgreSQL中列名表名长度限制](./postgres/PostgreSQL中表名列名长度限制.md)
-- [PostgreSQL如何添加内核函数](./postgres/PostgreSQL如何添加内核函数.md)
 - [Postgres源码分析——scan.l](./pg-src-analyze-scaan.l.md)
+
+
+- [PostgreSQL如何添加内核函数](./postgres/PostgreSQL如何添加内核函数.md)
+
 - [Postgres源码分析——执行计划EXPLAIN](./postgres/pg-src-analyze-explain.md)
 - [Postgres源码分析——UPDATE](./postgres/pg-src-analyze-update.md)
 - [Postgres源码分析——INSERT](./postgres/pg-src-analyze-insert.md)
