@@ -160,6 +160,8 @@ PostgreSQL的插件，开源分布式数据库。
 - [Redis中的持久化机制——AOF篇](./redis/redis-aof.md)
 - [Redis中的持久化机制——RDB篇](./redis/redis-rdb.md)
 - [Redis事务](./redis/redis-transaction.md)
+- [Redis数据类型Hash实现原理](./redis/redis-hash.md)]
+- [Redis数据类型String实现原理](./redis/redis-string.md)]
 
 ### TiDB
 - [单机部署Tikv](./tidb/单机部署Tikv.md)
