@@ -1,9 +1,9 @@
 ### PostgreSQL源码分析 —— CAST类型转换
 
-我们分析一下PostgreSQL中显式类型转换是如何实现的，在PostgreSQL中，显式类型转换可以用`CAST(x AS typename)` 等同于 `x::typename`。 这里我们以`select cast (2 as numeric`为例进行分析。
+我们分析一下PostgreSQL中显式类型转换是如何实现的，在PostgreSQL中，显式类型转换可以用`CAST(x AS typename)` 等同于 `x::typename`。 这里我们以`select cast (2 as numeri)`为例进行分析。
 
 #### 源码分析
-在分析类型转换前，我们前面分析过`CREATE CAST`的源码，类型转换实质就是定义个类型转换函数，存储在pg_cast系统表中。
+在分析类型转换前，我们前面分析过`CREATE CAST`的源码，类型转换实质就是定义个类型转换函数，存储在`pg_cast`系统表中。
 ```sql
 CREATE CAST (source_type AS target_type)
     WITH FUNCTION function_name [ (argument_type [, ...]) ]
@@ -198,7 +198,7 @@ transformTypeCast(ParseState *pstate, TypeCast *tc)
 }
 ```
 
-在这里，需要额外将一个系统表pg_cast，存储数据类型转换路径，包括内建的和用户自定义的类型。用户通过`CREATE CAST`创建的类型转换也存储在pg_cast系统表中。
+在这里，需要额外将一个系统表`pg_cast`，存储数据类型转换路径，包括内建的和用户自定义的类型。用户通过`CREATE CAST`创建的类型转换也存储在`pg_cast`系统表中。
 
 - oid oid  ： 行标识符
 - castsource oid (references pg_type.oid) ： 源数据类型的OID

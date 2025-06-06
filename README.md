@@ -30,13 +30,13 @@
 - [SQL解析器](./postgres/sql-engine/sql-parser.md)
 - [PostgreSQL中列名表名长度限制](./postgres/PostgreSQL中表名列名长度限制.md)
 - [Postgres源码分析——scan.l](./pg-src-analyze-scaan.l.md)
-
+- [Postgres源码分析——INSERT](./postgres/sql-engine/pg-src-analyze-insert.md)
 
 - [PostgreSQL如何添加内核函数](./postgres/PostgreSQL如何添加内核函数.md)
 
 - [Postgres源码分析——执行计划EXPLAIN](./postgres/pg-src-analyze-explain.md)
 - [Postgres源码分析——UPDATE](./postgres/pg-src-analyze-update.md)
-- [Postgres源码分析——INSERT](./postgres/pg-src-analyze-insert.md)
+
 - [Postgres源码分析——UPDATE分区表](./postgres/update-partiton-source-analyze.md)
 - [Postgres源码分析——视图查询重写](./postgres/pg-src-analyze-rewrite-view.md)
 - [Postgres源码分析——SeqScan](./postgres/pg-src-analyze-seqscan.md)
@@ -76,8 +76,8 @@
 
 ##### 类型系统
 - [Postgres源码分析——CREATE TYPE](./postgres/pg-src-analyze-create-type.md)
-- [Postgres源码分析——CREATE CAST](./postgres/pg-src-analyze-create-cast.md)
-- [Postgres源码分析——CAST类型转换](./postgres/pg-src-analyze-cast.md)
+- [Postgres源码分析——CREATE CAST](./postgres/sql-engine/pg-src-analyze-create-cast.md)
+- [Postgres源码分析——CAST类型转换](./postgres/sql-engine/pg-src-analyze-cast.md)
 - [Postgres源码分析——除法运算符](./postgres/pg-src-analyze-operator-div.md)
 
 
