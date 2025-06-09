@@ -31,7 +31,7 @@
 - [PostgreSQL中列名表名长度限制](./postgres/PostgreSQL中表名列名长度限制.md)
 - [Postgres源码分析——scan.l](./pg-src-analyze-scaan.l.md)
 - [Postgres源码分析——INSERT](./postgres/sql-engine/pg-src-analyze-insert.md)
-
+- [Postgres源码分析——CREATE VIEW](./postgres/sql-engine/pg-src-analyze-create-view.md)
 - [PostgreSQL如何添加内核函数](./postgres/PostgreSQL如何添加内核函数.md)
 
 - [Postgres源码分析——执行计划EXPLAIN](./postgres/pg-src-analyze-explain.md)
@@ -68,14 +68,14 @@
 
 - [Postgres源码分析——CREATE DATABASE](./postgres/pg-src-analyze-create-database.md)
 - [Postgres源码分析——CREATE SCHEMA](./postgres/pg-src-analyze-create-schema.md)
-- [Postgres源码分析——CREATE VIEW](./postgres/pg-src-analyze-create-view.md)
+
 - [Postgres源码分析——创建分区表](./postgres/pg-src-analyze-create-partition-table.md)
 - [Postgres源码分析——建表含有序列](./postgres/pg-src-analyze-create-table-series.md)
 - [Postgres源码分析 —— CTE](./postgres/pg-src-analyze-cte.md)
 - [Postgres源码分析——范围表](./postgres/pg-src-analyze-rte.md)
 
 ##### 类型系统
-- [Postgres源码分析——CREATE TYPE](./postgres/pg-src-analyze-create-type.md)
+- [Postgres源码分析——CREATE TYPE](./postgres/sql-engine/pg-src-analyze-create-type.md)
 - [Postgres源码分析——CREATE CAST](./postgres/sql-engine/pg-src-analyze-create-cast.md)
 - [Postgres源码分析——CAST类型转换](./postgres/sql-engine/pg-src-analyze-cast.md)
 - [Postgres源码分析——除法运算符](./postgres/pg-src-analyze-operator-div.md)
@@ -128,6 +128,9 @@
 - [PostgreSQL消息队列拓展PGMQ实现原理分析](./postgres/extension/pgmq-analyze.md)
 - [PostgreSQL消息队列拓展PGQ实现原理分析](./postgres/extension/pgq-analyze.md)
 - [向量拓展pgvector](./postgres/extension/pgvector.md)
+
+#### 其他
+- [PostgreSQL数据结构List解析](./postgres/pg-list.md)
 
 ### Greenplum
 基于PostgreSQL的MPP分布式数据库。目前已经闭源，但是代码还可以看到。
