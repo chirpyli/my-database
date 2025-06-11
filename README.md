@@ -10,11 +10,7 @@
 
 ## 数据库系统原理篇
 
-### 查询优化器
 
-- [逻辑优化——常量表达式化简](./query-optimizer/simplify_const_expression.md)
-- [查询优化之子连接优化](./postgres/查询优化之子连接优化.md)
-- [逻辑优化——子查询优化](./query-optimizer/subquery-optimizer.md)
 ## 数据库篇
 
 ### PostgreSQL
@@ -57,6 +53,14 @@
 - [Postgres源码分析之CTE](./postgres/pg-src-analyze-cte.md)
 - [Postgres源码分析 —— unnest函数](./postgres/pg-src-analyze-function-unnest.md)
 
+
+##### 优化器
+
+- [逻辑优化——常量表达式化简](./postgres/sql-engine/simplify_const_expression.md)
+- [查询优化之子连接优化](./postgres/查询优化之子连接优化.md)
+- [逻辑优化——子查询优化](./postgres/sql-engine/subquery-optimizer.md)
+
+##### 执行器
 
 #### 存储引擎
 - [PostgreSQL源码分析——缓冲区](./postgres/storage-engine/pg-src-analyze-shared-buffer.md)
@@ -131,6 +135,7 @@
 
 #### 其他
 - [PostgreSQL数据结构List解析](./postgres/pg-list.md)
+- [PostgreSQL位图集合](./postgres/pg-bitmapset.md)
 
 ### Greenplum
 基于PostgreSQL的MPP分布式数据库。目前已经闭源，但是代码还可以看到。
