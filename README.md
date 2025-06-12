@@ -35,7 +35,7 @@
 
 - [Postgres源码分析——UPDATE分区表](./postgres/update-partiton-source-analyze.md)
 - [Postgres源码分析——视图查询重写](./postgres/pg-src-analyze-rewrite-view.md)
-- [Postgres源码分析——SeqScan](./postgres/pg-src-analyze-seqscan.md)
+- [Postgres源码分析——SeqScan](./postgres/sql-engine/pg-src-analyze-seqscan.md)
 - [Postgres源码分析——IndexScan](./postgres/pg-src-analyze-indexscan.md)
 - [Postgres源码分析—— ValueScan](./postgres/pg-src-analyze-valuescan.md)
 - [Postgres源码分析 —— FunctionScan](./postgres/pg-src-analyze-functionscan.md)

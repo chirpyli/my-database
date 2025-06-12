@@ -280,9 +280,7 @@ evaluate_expr(Expr *expr, Oid result_type, int32 result_typmod,
 	int16		resultTypLen;
 	bool		resultTypByVal;
 
-	/*
-	 * To use the executor, we need an EState.
-	 */
+	/* To use the executor, we need an EState. */
 	estate = CreateExecutorState();
 
 	/* We can use the estate's working context to avoid memory leaks. */
@@ -334,9 +332,7 @@ evaluate_expr(Expr *expr, Oid result_type, int32 result_typmod,
 	/* Release all the junk we just created */
 	FreeExecutorState(estate);
 
-	/*
-	 * Make the constant result node.
-	 */
+	/* Make the constant result node. */
 	return (Expr *) makeConst(result_type, result_typmod, result_collation,
 							  resultTypLen,
 							  const_val, const_is_null,
@@ -368,8 +364,7 @@ AexprConst: Iconst
 Iconst:		ICONST	{ $$ = $1; };       // 1 
 
 A_Expr *
-makeSimpleA_Expr(A_Expr_Kind kind, char *name,
-				 Node *lexpr, Node *rexpr, int location)
+makeSimpleA_Expr(A_Expr_Kind kind, char *name, Node *lexpr, Node *rexpr, int location)
 {
 	A_Expr	   *a = makeNode(A_Expr);
 
