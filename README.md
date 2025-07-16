@@ -63,12 +63,14 @@
 - [逻辑优化——子查询优化](./postgres/sql-engine/subquery-optimizer.md)
 
 ##### 执行器
+- [PostgreSQL聚合算子实现原理](./postgres/sql-engine/pg-agg.md)
 
 #### 存储引擎
 - [PostgreSQL源码分析——缓冲区](./postgres/storage-engine/pg-src-analyze-shared-buffer.md)
 - [PostgreSQL源码分析——数据页校验](./postgres/storage-engine/pg-src-analyze-checksum.md)
 - [PostgreSQL源码分析——外存管理](./postgres/storage-engine/pg-src-analyze-smgr.md)
 - [PostgreSQL源码分析——空闲空间映射表](./postgres/storage-engine/pg-src-analyze-freespacemap.md)
+- [PostgreSQL中TOAST机制](./postgres/storage-engine/pg-toast.md)
 
 ##### 建表相关
 
