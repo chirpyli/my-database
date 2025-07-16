@@ -71,6 +71,7 @@
 - [PostgreSQL源码分析——外存管理](./postgres/storage-engine/pg-src-analyze-smgr.md)
 - [PostgreSQL源码分析——空闲空间映射表](./postgres/storage-engine/pg-src-analyze-freespacemap.md)
 - [PostgreSQL中TOAST机制](./postgres/storage-engine/pg-toast.md)
+- [PostgreSQL中大对象存储](./postgres/storage-engine/pg-largeobject.md)
 
 ##### 建表相关
 
