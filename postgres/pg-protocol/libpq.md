@@ -1,4 +1,6 @@
-libpq是应用程序员使用PostgreSQL的C接口。libpq是一个库函数的集合，它们允许客户端程序传递查询给PostgreSQL后端服务器并且接收这些查询的结果。通俗一点，就是客户端通过libpq与数据库服务器进行交互，比如发送查询，接收查询结果。
+libpq是应用程序员使用PostgreSQL的C接口。libpq是一个库函数的集合，它们允许客户端程序传递查询给PostgreSQL后端服务器并且接收这些查询的结果。通俗一点，就是客户端通过libpq与数据库服务器进行交互，比如发送查询，接收查询结果，负责处理PostgreSQL通信协议。
+
+libpq分为两部分，一部分是提供给客户端的接口，另一部分是服务端处理客户端的请求。比较重要的过程是定义客户端与服务端的通信协议，即交互过程。比如建立连接阶段，如何进行认证，正常阶段如何接受客户端并解析客户端的请求，服务端如何向客户端发送结果，如何结束查询等。
 
 ### 代码分析
 下面分析一些重要的接口函数。比如客户端如何连接数据库服务器，如何发送查询，如何接收查询结果。本文不对libpq协议进行完整的分析，而且通过对关键代码的分析，理解libpq的工作原理以及libpq的底层实现。
@@ -237,9 +239,8 @@ struct pg_result
 {
 	int			ntups;
 	int			numAttributes;
-	PGresAttDesc *attDescs;
-	PGresAttValue **tuples;		/* each PGresult tuple is an array of
-								 * PGresAttValue's */
+	PGresAttDesc *attDescs;     // 属性（列）信息
+	PGresAttValue **tuples;	    // 二维数组，返回结果集的行和列，共计ntups行，numAttributes列
 	int			tupArrSize;		/* allocated size of tuples array */
 	int			numParameters;
 	PGresParamDesc *paramDescs;
@@ -358,13 +359,96 @@ PostgreSQL协议交互流程主要包括：
 
 
 ##### 数据请求应答过程
-在认证过程结束后，服务端会向前端发送`ReadyForQuery`消息。`ReadyForQuery`消息是后端已经准备好接收新的前端请求的通知消息，对于简单查询和扩展查询来说，虽然`CommandComplete`消息已经表示SQL请求执行结束了，但实际上后端可能尚未准备好执行新的查询请求，所以PostgreSQL协议要求前端应该侦听到`ReadyForQuery`消息之后才能发出新的查询请求，而不是侦听到`CommandComplete`消息。
+在认证过程结束后，服务端会向前端发送`ReadyForQuery`消息。`ReadyForQuery`消息是后端已经准备好接收新的前端请求的通知消息。当有新消息时，服务端首先读取消息类型`T`，先读取一个字符，根据不同的消息类型，设置最长的消息长度，对于`Q`类型来说，上限为1G，也就是说PostgreSQL数据库允许用户输入的最大SQL长度为1GB，然后读取4字节的长度信息，获取此条消息的长度，然后根据此长度读取消息内容，最后根据消息类型，执行不同的处理逻辑。遵循`T-L-V`的处理原则。
+
+`CommandComplete`消息已经表示该条SQL请求执行结束了，但是实际上一次查询可能包裹多个SQL，比如`sql1;sql2;`，执行完`sql1`后会通过`EndCommand`函数发送`CommandComplete`消息，只有所有的SQL执行完毕后才会发送`ReadyForQuery`消息，所以PostgreSQL协议要求前端应该侦听到`ReadyForQuery`消息之后才能发出新的查询请求，而不是侦听到`CommandComplete`消息。
 
 然后客户端就可以向服务端发送查询请求，比如`Q`消息，服务端会返回`RowDescription`消息和`DataRow`消息，表示查询结果。
 
 
+```c++
+PostgresMain(int argc, char *argv[], const char *dbname, const char *username)
+{
+	/* 
+	 * 发送K消息，cancel key
+	 * 在服务端认证通过后，服务端会返回一个cancel key，用于取消查询
+	 * 客户端可以发送这个cancel key到服务端，取消查询
+	 */
+ 	if (whereToSendOutput == DestRemote)
+	{
+		StringInfoData buf;
+
+		pq_beginmessage(&buf, 'K');
+		pq_sendint32(&buf, (int32) MyProcPid);   // 进程ID
+		pq_sendint32(&buf, (int32) MyCancelKey); // 随机生成
+		pq_endmessage(&buf);
+		/* Need not flush since ReadyForQuery will do it. */
+	}
+
+	// 不断接收客户端请求
+	for (;;)
+	{
+		// 发送ReadyForQuery消息，表示服务端准备好接收客户端请求了
+		if (send_ready_for_query)
+		{
+			ReadyForQuery(whereToSendOutput); 
+			send_ready_for_query = false;
+		}
+
+		// 读取一个字符，判断消息类型T
+		firstchar = ReadCommand(&input_message);
+
+		switch (firstchar)
+		{
+			case 'Q':			/* simple query */
+				{
+					const char *query_string;
+					// 获取查询字符串，先读取4个字节，读取消息长度，然后再读取消息内容
+					query_string = pq_getmsgstring(&input_message);
+					pq_getmsgend(&input_message);
+
+					if (am_walsender)
+					{
+						if (!exec_replication_command(query_string))
+							exec_simple_query(query_string);
+					}
+					else
+						exec_simple_query(query_string);
+						{
+							// 遍历抽象语法树链表（可能有多个SQL）
+							foreach(parsetree_item, parsetree_list)
+							{
+								// 生成查询树
+								pg_analyze_and_rewrite(parsetree, query_string, NULL, 0, NULL);
+								// 生成执行计划
+								pg_plan_queries(querytree_list, query_string, CURSOR_OPT_PARALLEL_OK, NULL);
+								// 执行
+								PortalRun(portal, FETCH_ALL, true, true, receiver, receiver, &qc);
+
+								// 结束命令，发送`C`消息
+								EndCommand(&qc, dest, false);
+							}
+						}
+
+					send_ready_for_query = true;
+				}
+				break;
+			// ...
+		}
+
+	}
+
+}
+ 
+```
+
+
 ##### 异步消息
 异步操作`NoticeResponse`消息，类型为`N`，其内容为一组固定的key-value对，异步操作通常是后端主动推送的，例如当后端的数据库服务器需要重启时，后端可能会通知前端来关闭连接。
+
+
+### 其他
+这里补充一下PostgreSQ中的postmaster进程负责监听端口，当客户端发起连接时，创建一个postgres后台进程负责该客户端的连接，创建进程postgres进程后，由postgres进程来与客户端进行握手，也就是第一个阶段启动阶段，负责与客户端交互通信协议，发送授权信息等，如果一切正常，服务端会反馈状态信息，连接成功创建，通过函数`ReadyForQuery`发送`Z`消息告知客户端一切就绪，进入到常规状态。也就是说是postgres进程负责与客户端的socket发送与接收，并不是postmaster进程。
 
 
 参考文档：

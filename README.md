@@ -14,10 +14,12 @@
 ## 数据库篇
 
 ### PostgreSQL
-开源关系型数据库。
+开源关系型集中式数据库。
 
 #### PostgreSQL协议
-- [libpq原理分析](./postgres/libpq.md)
+- [libpq原理分析](./postgres/pg-protocol/libpq.md)
+- [Postgres源码分析——口令认证](./postgres/pg-protocol/pg-src-analyze-auth.md)
+- [Postgres源码分析——psql](./postgres/pg-protocol/pg-src-analyze-psql.md)
 
 #### SQL引擎
 
@@ -109,14 +111,14 @@
 
 #### 安全类
 - [Postgres源码分析——创建用户](./postgres/pg-src-analyze-create-user.md)
-- [Postgres源码分析——口令认证](./postgres/pg-src-analyze-auth.md)
+
 - [PostgreSQL源码分析——对象访问控制](./postgres/pg-src-analyze-rbac.md)
 
 
 #### 工具类
 - [Postgres源码分析——pg_basebackup](./postgres/pg-src-analyze-pg_basebackup.md)
 - [Postgres源码分析——initdb](./postgres/pg-src-analyze-initdb.md)
-- [Postgres源码分析——psql](./postgres/pg-src-analyze-psql.md)
+
 - [Postgres源码分析——日志进程](./postgres/pg-src-analyze-log.md)
 
 #### 异步通知
@@ -124,7 +126,7 @@
 
 #### 插件
 - [PostgreSQL源码分析——pg_stat_statements](./postgres/extension/pg-src-analyze-pg-stat-statements.md)
-- [PostgreSQL源码分析——auth_delay](./postgres/extension/pg-src-analyze-auth-delay.md)
+- [PostgreSQL拓展之auth_delay](./postgres/extension/auth_delay.md)
 - [PostgreSQL源码分析——auto_explain](./postgres/extension/pg-src-analyze-auto-explain.md)
 - [PostgreSQL源码分析——pg_buffercache](./postgres/extension/pg-src-analyze-buffercache.md)
 - [PostgreSQL审计插件pgaudit](./postgres/extension/pg-src-analyze-pgaudit.md)
@@ -137,7 +139,7 @@
 - [PostgreSQL消息队列拓展PGMQ实现原理分析](./postgres/extension/pgmq-analyze.md)
 - [PostgreSQL消息队列拓展PGQ实现原理分析](./postgres/extension/pgq-analyze.md)
 - [向量拓展pgvector](./postgres/extension/pgvector.md)
-
+- [citus建表分析](./postgres/extension/citus-analyze-create-distributed-table.md)
 #### 其他
 - [PostgreSQL数据结构List解析](./postgres/pg-list.md)
 - [PostgreSQL位图集合](./postgres/pg-bitmapset.md)
@@ -149,7 +151,7 @@
 
 ### Citus
 PostgreSQL的插件，开源分布式数据库。
-- [citus建表分析](./citus/src-analyze-create-distributed-table.md)
+
 
 ### openGauss
 华为开源的数据库，基于PostgreSQL。
