@@ -61,7 +61,7 @@
 ##### 优化器
 
 - [逻辑优化——常量表达式化简](./postgres/sql-engine/simplify_const_expression.md)
-- [查询优化之子连接优化](./postgres/查询优化之子连接优化.md)
+- [查询优化之子连接优化](./postgres/sql-engine/pg-subquery-optimizer.md)
 - [逻辑优化——子查询优化](./postgres/sql-engine/subquery-optimizer.md)
 
 ##### 执行器
