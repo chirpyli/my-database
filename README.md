@@ -124,13 +124,14 @@
 #### 异步通知
 - [Postgres源码分析——异步通知](./postgres/pg-listen-notify.md)
 
-#### 插件
-- [PostgreSQL源码分析——pg_stat_statements](./postgres/extension/pg-src-analyze-pg-stat-statements.md)
+#### 扩展
+- [PostgreSQL源码分析——pg_stat_statements](./postgres/extension/pg_stat_statements.md)
 - [PostgreSQL拓展之auth_delay](./postgres/extension/auth_delay.md)
-- [PostgreSQL源码分析——auto_explain](./postgres/extension/pg-src-analyze-auto-explain.md)
+- [PostgreSQL源码分析——auto_explain](./postgres/extension/auto_explain.md)
+- [PostgreSQL执行计划过滤扩展——plan_filter](./postgres/extension/pg_plan_filter.md)
 - [PostgreSQL源码分析——pg_buffercache](./postgres/extension/pg-src-analyze-buffercache.md)
 - [PostgreSQL审计插件pgaudit](./postgres/extension/pg-src-analyze-pgaudit.md)
-- [PostgreSQL插件之pg_freespacemap](./postgres/extension/pg-src-analyze-pg-freespacemap.md)
+- [PostgreSQL插件之pg_freespacemap](./postgres/extension/pg_freespacemap.md)
 - [PostgreSQL数据库插件——pg_visibility](./postgres/extension/pg_visibility.md)
 - [PostgreSQL定时任务插件——pg_cron](./postgres/extension/pg_cron.md)
 - [PostgreSQL消息队列拓展——PGMQ](./postgres/extension/pgmq.md)
@@ -140,6 +141,7 @@
 - [PostgreSQL消息队列拓展PGQ实现原理分析](./postgres/extension/pgq-analyze.md)
 - [向量拓展pgvector](./postgres/extension/pgvector.md)
 - [citus建表分析](./postgres/extension/citus-analyze-create-distributed-table.md)
+
 #### 其他
 - [PostgreSQL数据结构List解析](./postgres/pg-list.md)
 - [PostgreSQL位图集合](./postgres/pg-bitmapset.md)

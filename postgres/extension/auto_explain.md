@@ -1,4 +1,4 @@
-## PostgreSQL源码分析——auto_explain
+## PostgreSQL拓展——auto_explain
 
 auto_explain是PostgreSQL的一个插件，用于自动记录执行时间超过指定阈值的查询的执行计划。这个功能对于优化查询性能非常有用，因为它可以帮助开发人员了解哪些查询是性能瓶颈，从而进行相应的优化。
 
