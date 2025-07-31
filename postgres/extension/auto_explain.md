@@ -1,6 +1,6 @@
-## PostgreSQL拓展——auto_explain
+## PostgreSQL数据库扩展——auto_explain
 
-auto_explain是PostgreSQL的一个插件，用于自动记录执行时间超过指定阈值的查询的执行计划。这个功能对于优化查询性能非常有用，因为它可以帮助开发人员了解哪些查询是性能瓶颈，从而进行相应的优化。
+auto_explain是PostgreSQL的一个插件，用于自动记录执行时间超过指定阈值的SQL的执行计划。这个功能对于优化查询性能非常有用，因为它可以帮助开发人员了解哪些查询是性能瓶颈，从而进行相应的优化。
 
 auto_explain的实现非常简单，它通过在执行查询之前和之后记录一些关键信息，然后比较这些信息（时间信息）来判断查询是否超过了指定的阈值。如果超过了阈值，auto_explain就会记录查询的执行计划，并将其输出到日志文件中。
 
@@ -45,11 +45,10 @@ postgres=# select * from t1;        -- 查询日志
 ```
 
 ### 实现思路
-具体实现上，关键是记录运行时间，需要在执行前后进行记录，即在ExecutorRun中，添加相应的代码，如果执行的时间超过GUC参数设置的阈值则根据执行器的执行计划节点输出执行计划
+具体实现上，核心是记录SQL运行时间，需要在执行前后进行记录，即在执行器ExecutorRun中，添加相应的代码，如果执行的时间超过GUC参数设置的阈值则根据执行器的执行计划节点输出执行计划。
 ```c++
 void standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, uint64 count, bool execute_once)
 {
-
 	/* Allow instrumentation of Executor overall runtime */
 	if (queryDesc->totaltime)
 		InstrStartNode(queryDesc->totaltime);   // 记录开始时间
@@ -457,6 +456,8 @@ static void explain_ExecutorEnd(QueryDesc *queryDesc)
 		standard_ExecutorEnd(queryDesc);
 }
 ```
+
+---
 
 参考文档：
 [auto_explain](https://www.postgresql.org/docs/current/auto-explain.html)

@@ -129,6 +129,7 @@
 - [PostgreSQL拓展之auth_delay](./postgres/extension/auth_delay.md)
 - [PostgreSQL源码分析——auto_explain](./postgres/extension/auto_explain.md)
 - [PostgreSQL执行计划过滤扩展——plan_filter](./postgres/extension/pg_plan_filter.md)
+- [PostgreSQL优化器提示扩展——pg_hint_plan](./postgres/extension/pg_hint_plan.md)
 - [PostgreSQL源码分析——pg_buffercache](./postgres/extension/pg-src-analyze-buffercache.md)
 - [PostgreSQL审计插件pgaudit](./postgres/extension/pg-src-analyze-pgaudit.md)
 - [PostgreSQL插件之pg_freespacemap](./postgres/extension/pg_freespacemap.md)
