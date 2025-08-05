@@ -132,6 +132,7 @@
 - [PostgreSQL优化器提示扩展——pg_hint_plan](./postgres/extension/pg_hint_plan.md)
 - [PostgreSQL bloom索引扩展——bloom](./postgres/extension/bloom.md)
 - [PostgreSQL虚拟索引扩展hypopg](./postgres/extension/hypopg.md)
+- [PostgreSQL索引推荐扩展index_advisor](./postgres/extension/index_advisor.md)
 - [PostgreSQL源码分析——pg_buffercache](./postgres/extension/pg-src-analyze-buffercache.md)
 - [PostgreSQL审计插件pgaudit](./postgres/extension/pg-src-analyze-pgaudit.md)
 - [PostgreSQL插件之pg_freespacemap](./postgres/extension/pg_freespacemap.md)

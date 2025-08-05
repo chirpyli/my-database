@@ -259,6 +259,7 @@ postgres=# CREATE INDEX idx_id_hypo ON hypo (id);
 CREATE INDEX
 Time: 1277.969 ms (00:01.278)
 ```
+> 创建虚拟索引非常快的原因是它只是创建了索引元数据，不需要创建索引物理页面，不用扫描源表堆表去构建索引物理页面。
 
 
 ---
