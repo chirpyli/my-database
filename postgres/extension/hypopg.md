@@ -265,6 +265,6 @@ Time: 1277.969 ms (00:01.278)
 ---
 
 参考文档：
-[Hypothetical indexes for PostgreSQL]([Hypothetical indexes for PostgreSQL](https://hypopg.readthedocs.io/en/rel1_stable/))
+[Hypothetical indexes for PostgreSQL](https://hypopg.readthedocs.io/en/rel1_stable/))
 [hypopg（虚拟索引）](https://help.aliyun.com/zh/polardb/polardb-for-postgresql/hypopg?spm=a2c4g.11186623.help-menu-2249963.d_7_9.53a249539FjqcS)
 [hypopg deepwiki](https://deepwiki.com/HypoPG/hypopg)
