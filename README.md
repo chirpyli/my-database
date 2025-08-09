@@ -68,16 +68,16 @@
 - [PostgreSQL聚合算子实现原理](./postgres/sql-engine/pg-agg.md)
 
 #### 存储引擎
-- [PostgreSQL源码分析——缓冲区](./postgres/storage-engine/pg-src-analyze-shared-buffer.md)
-- [PostgreSQL源码分析——数据页校验](./postgres/storage-engine/pg-src-analyze-checksum.md)
-- [PostgreSQL源码分析——外存管理](./postgres/storage-engine/pg-src-analyze-smgr.md)
-- [PostgreSQL源码分析——空闲空间映射表](./postgres/storage-engine/pg-src-analyze-freespacemap.md)
+- [PostgreSQL源码分析——缓冲区](./postgres/storage-engine/pg-sharedbuffer.md)
+- [PostgreSQL源码分析——数据页校验](./postgres/storage-engine/pg-checksum.md)
+- [PostgreSQL源码分析——外存管理](./postgres/storage-engine/pg-smgr.md)
+- [PostgreSQL源码分析——空闲空间映射表](./postgres/storage-engine/pg-fsm.md)
 - [PostgreSQL中TOAST机制](./postgres/storage-engine/pg-toast.md)
 - [PostgreSQL中大对象存储](./postgres/storage-engine/pg-largeobject.md)
 
 ##### 建表相关
 
-- [Postgres源码分析——CREATE DATABASE](./postgres/pg-src-analyze-create-database.md)
+- [Postgres创建数据库CREATE DATABASE分析](./postgres/sql-engine/pg-create-database.md)
 - [Postgres源码分析——CREATE SCHEMA](./postgres/pg-src-analyze-create-schema.md)
 
 - [Postgres源码分析——创建分区表](./postgres/pg-src-analyze-create-partition-table.md)

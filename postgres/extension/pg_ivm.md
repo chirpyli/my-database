@@ -1,12 +1,11 @@
 ## PostgreSQL增量物化视图pg_ivm
-
-
 增量物化视图（Incremental View Maintenance，简称 IVM）是一种物化视图数据增量更新的技术，其通过仅计算并应用视图中的增量变更来实现更新，而不是像 `REFRESH MATERIALIZED VIEW` 命令那样从头开始重新计算整个视图。当视图中只有少量部分发生变更时，IVM更新物化视图的效率要高于完全重新计算。
 
 关于视图维护的时机，有两种方法：立即更新和延迟更新。在立即更新中，视图会在其基表被修改的同一事务中进行更新。而在延迟更新中，视图的更新会在事务提交之后进行，例如在访问视图时、响应如 `REFRESH MATERIALIZED VIEW` 这样的用户命令时，或在后台定期执行等。`pg_ivm` 提供的是一种立即更新方式，即在基表被修改时，通过AFTER触发器立即更新物化视图。
 
+我们首先介绍一下增量物化视图的使用，随后分析其实现原理。
 
-### 增量物化视图的使用
+### 一、增量物化视图的使用
 
 安装扩展：
 ```sql
@@ -153,7 +152,7 @@ postgres=# SELECT immvrelid, pgivm.get_immv_def(immvrelid) FROM pgivm.pg_ivm_imm
 #### 行级安全
 如果某些基表具有行级安全策略，则对物化视图所有者不可见的行将从结果中排除。此外，当以增量方式维护视图时，也会排除此类行。但是，如果在创建物化视图后定义了新策略或更改了策略，则新策略将不会应用于视图内容。要应用新策略，您需要重新创建IMMV。
 
-### 支持的视图定义和限制
+### 二、支持的视图定义和限制
 目前，IMMV 的视图定义可以包含内连接（inner joins）、DISTINCT 子句、一些内置的聚合函数、FROM 子句中的简单子查询、EXISTS 子查询以及简单的 CTE（WITH 查询）。支持包含自连接的内连接，但不支持外连接（outer joins）。支持的聚合函数包括 count、sum、avg、min 和 max。视图定义中不能使用其他聚合函数，也不能使用包含聚合函数或 DISTINCT 子句的子查询、FROM 子句以外的子查询、窗口函数、HAVING、ORDER BY、LIMIT/OFFSET、UNION/INTERSECT/EXCEPT、DISTINCT ON、TABLESAMPLE、VALUES 以及 FOR UPDATE/SHARE。
 
 基表必须是普通表，不能使用视图、物化视图、继承父表、分区表、分区、外部表。
@@ -206,9 +205,7 @@ postgres=# SELECT immvrelid, pgivm.get_immv_def(immvrelid) FROM pgivm.pg_ivm_imm
 假设在两个基表上定义了IMMV，并且每个表在不同的并发事务中被同时修改。在先被提交的事务中，IMMV可被更新，因为这里只需要考虑发生在本事务中的改变。另一方面，为了正确更新在稍后提交事务里的IMMV，我们需要知道发生在每个事务里的变化。因此，在读已提交模式下修改基表后，IMMV立即持有ExclusiveLock，以确保在前一个事务提交后在后一个事务中更新IMMV。 在 REPEATABLE READ 或者 SERIALIZABLE 模式，如果获取锁失败，则会立即引发错误，因为其他事务中发生的任何更改在这些模式下都不可见，并且IMMV在这种情况下无法正确更新。当然也有例外：如果IMMV只有一个基表并且不使用DISTINCT或者GROUP BY，并且表是被 INSERT 修改的，IMMV持有的锁是 RowExclusiveLock。
 
 
-
-
-### 性能对比
+### 三、性能对比
 我们对比一下物化视图和增量物化视图的性能差异。
 
 我们首先创建普通物化视图，对基表进行更新以及对普通物化视图进行刷新。
@@ -251,11 +248,9 @@ Time: 0.959 ms
 可以看到，增量物化视图的更新代价非常小。
 
 
-### 基本设计原理
+### 四、基本设计原理
 
-设计原理可参考[Incremental View Maintenance](https://wiki.postgresql.org/wiki/Incremental_View_Maintenance)
-
-里面说的非常明白。
+设计原理可参考[Incremental View Maintenance](https://wiki.postgresql.org/wiki/Incremental_View_Maintenance)，里面说的非常明白。
 
 IVM computes and applies only the incremental changes to the materialized views. Suppose that view V is defined by query Q over a state of base relations D. When D changes D' = D + dD, we can get the new view state V' by calculating from D' and Q, and this is re-computation performed by REFRESH MATERIALIZED VIEW command. On the other hand, IVM calculates the delta for view (dV) from the base tables delta (dD) and view definition (Q), and applies this to get the new view state, V' = V + dV.
 
@@ -263,27 +258,17 @@ In theory, the view definition is described in a relational algebra (or bag alge
 
 When table R is changed in a transaction, this can be described as R ← R - ∇R + ΔR, where ∇R and ΔR denote tuples deleted from and inserted into R, respectively. (To be accurate, instead of - and +, ∸ and ⨄ are used by tradition in bag algebra.) In this condition, the deltas of the view are calculated as ∇V = ∇R ⨝ S and ΔV = ΔR ⨝ S, then the view can be updated as V ← V - ∇V + ΔV.
 
-基表的变化分为新增和删除。 
-V ← V - ∇V + ΔV. 
+![image](./images/pg_ivm_theory.png)
+
 
 术语：
 - 基表（Base table）:指物化视图定义中使用到的普通表
 - 增量（Delta）：指基表的数据发生变化时，与物化视图中的数据相比，增加和删除的数据集合。
-  
 
-增量物化视图是一种使物化视图保持最新的方法。其中只计算增量更改并将其应用于视图，而不是重新计算整个视图（`REFRESH MATERIALIZED VIEW`）。
+#### 如何监测基表的改动呢？
+核心是触发器（after trigger）和转换表机制， 是基于触发器去实现的，在基表上创建`INSERT | UPDAE | DELETE | TRUNCATE ` AFTER STATEMENT触发器，当对基表修改时，通过触发器执行触发器函数，触发器中有个特性，支持REFERENCING选项。
 
-物化视图的更新有两种方法：
-- 立即更新：在修改物化视图的同一事务中更新物化视图
-- 延迟更新：在事务提交后更新物化视图，例如当要访问物化视图时使用
-  
-当前PostgreSQL支持物化视图，但仅支持`REFRESH MATERIALIZED VIEW`命令刷新物化视图，此种方式为重新构建物化视图。pg_ivm扩展提供了一种即时维护物化视图的方法，当修改基表时，物化视图在AFTER触发器中立即更新。所以，这样的设计的代价就是更新基表会更慢，但好处是比`REFRESH MATERIALIZED VIEW`方式更新物化视图要快。
-
-每次修改基表时，会通过特定的算法计算增量数据，这个算法是通过关系代数水下的。基表与增量物化视图的变化不是一一对应的，基表插入十条数据，增量物化视图不一定插入十条数据，所以要通过计算得到增量数据。
-
-如何监测对基表的改动呢？核心是触发器（after trigger）和转换表机制， 是基于触发器去实现的，在基表上创建`INSERT | UPDAE | DELETE | TRUNCATE ` AFTER STATEMENT触发器，当对基表修改时，通过触发器执行触发器函数，触发器中有个特性，支持REFERENCING选项。
-
-REFERENCING选项启用对传递关系的收集，传递关系是包括被当前SQL语句插入、删除或者修改的行的行集合。这个特性让触发器能看到该语句做的事情的全局视图，而不是一次只看到一行。仅对非约束触发器的AFTER触发器允许这个选项。此外，如果触发器是一个UPDATE触发器，则它不能指定column_name列表。OLD TABLE仅可以被指定一次，并且只能为在UPDATE或DELETE事件上引发的触发器指定，它创建的传递关系包含有该语句更新或删除的所有行的前映像。类似地，NEW TABLE仅可以被指定一次，并且只能为在UPDATE或INSERT事件上引发的触发器指定，它创建的传递关系包含有该语句更新或插入的所有行的后映像。
+>REFERENCING选项启用对传递关系的收集，传递关系是包括被当前SQL语句插入、删除或者修改的行的行集合。这个特性让触发器能看到该语句做的事情的全局视图，而不是一次只看到一行。仅对非约束触发器的AFTER触发器允许这个选项。此外，如果触发器是一个UPDATE触发器，则它不能指定column_name列表。OLD TABLE仅可以被指定一次，并且只能为在UPDATE或DELETE事件上引发的触发器指定，它创建的传递关系包含有该语句更新或删除的所有行的前映像。类似地，NEW TABLE仅可以被指定一次，并且只能为在UPDATE或INSERT事件上引发的触发器指定，它创建的传递关系包含有该语句更新或插入的所有行的后映像。
 ```sql
 CREATE [ OR REPLACE ] [ CONSTRAINT ] TRIGGER name { BEFORE | AFTER | INSTEAD OF } { event [ OR ... ] }
     ON table_name
@@ -304,16 +289,8 @@ CREATE [ OR REPLACE ] [ CONSTRAINT ] TRIGGER name { BEFORE | AFTER | INSTEAD OF 
 > [CREATE TRIGGER](http://postgres.cn/docs/14/sql-createtrigger.html)
 
 
-对基表创建触发器，以便监测基表的更新，获取基表的更新。
-在满足一定条件的时候，对增量物化视图创建唯一索引，加速增量物化视图的增量刷新。
-
-如何计算增量？
-其实基表的变化就2点：
-- 新增的数据
-- 删除的数据
-UPDATE可视为删除再新增。物化视图的更新同样，新增的数据，删除的数据。
-
-怎么把增量数据应用到物化视图中呢？
+#### 如何根据基表的增量计算物化视图的增量？
+前面已通过触发器以及转换表机制，已经实现了对基表的改动的监测以及获取了增量数据，那么如何根据基表的增量计算物化视图的增量呢？
 ```sql
 -- view definition
 select ... fom A,B where ...
@@ -326,28 +303,20 @@ select ... from new_table_A,B where ...
 select ... from old_table_A,B where ...
 ```
 
+![image](./images/pg_ivm_calc_deta.png)
 
-如果视图定义中含有DISTINCT怎么处理？
-1. 添加一个特殊列__ivm_count__，维护count值
-2. 当视图中已含有相同的元组，count数值相应的增加计数，如果相同的元组不存在，则视图中插入一个新元组。
-3. 当将要在视图中删除元组时，count计数减少，当count数值为0时，则可以从视图中删除该元组。
+#### 怎么把增量数据应用到物化视图中呢？
 
+实质就是在计算出物化视图的增量数据（分为需要insert的以及delete的）后，对物化视图表进行insert和delete操作。这也是为什么在增量物化视图的创建过程中，会根据视图定义自动创建增量物化视图表的索引，创建索引后，对增量物化视图表的更新操作就会更加高效。
 
-需要禁止用户直接操作增量物化视图表。
-
-为什么不支持外部表、视图，因为触发器不支持TRUNCATE外部表、视图，我们的设计是基于触发器实现的。
-
-在计算增量视图前，必须要锁定所有基表，设置for update锁。
+![image](./images/pg_ivm_principle.png)
 
 
-ivm_immediate_maintenance
---> calc_delta
---> apply_delta
-
- R ← R - ∇R + ΔR
-
+#### 部分源码解析
 
 核心实现函数：当基表发生更新时，会触发After触发器，调用该函数。
+![image](./images/pg_ivm.png)
+
 ```c++
 /*
  * IVM_immediate_maintenance
@@ -472,8 +441,34 @@ apply_old_delta(const char *matviewname, const char *deltaname_old,
 ```
 
 
+### 其他补充
+增量物化视图是一种使物化视图保持最新的方法。其中只计算增量更改并将其应用于视图，而不是重新计算整个视图（`REFRESH MATERIALIZED VIEW`）。
+
+物化视图的更新有两种方法：
+- 立即更新：在修改物化视图的同一事务中更新物化视图
+- 延迟更新：在事务提交后更新物化视图，例如当要访问物化视图时使用
+  
+当前PostgreSQL支持物化视图，但仅支持`REFRESH MATERIALIZED VIEW`命令刷新物化视图，此种方式为重新构建物化视图。pg_ivm扩展提供了一种即时维护物化视图的方法，当修改基表时，物化视图在AFTER触发器中立即更新。所以，这样的设计的代价就是更新基表会更慢，但好处是比`REFRESH MATERIALIZED VIEW`方式更新物化视图要快。
+
+每次修改基表时，会通过特定的算法计算增量数据，这个算法是通过关系代数水下的。基表与增量物化视图的变化不是一一对应的，基表插入十条数据，增量物化视图不一定插入十条数据，所以要通过计算得到增量数据。
 
 
+
+对基表创建触发器，以便监测基表的更新，获取基表的更新。
+在满足一定条件的时候，对增量物化视图创建唯一索引，加速增量物化视图的增量刷新。
+
+如果视图定义中含有DISTINCT怎么处理？
+1. 添加一个特殊列__ivm_count__，维护count值
+2. 当视图中已含有相同的元组，count数值相应的增加计数，如果相同的元组不存在，则视图中插入一个新元组。
+3. 当将要在视图中删除元组时，count计数减少，当count数值为0时，则可以从视图中删除该元组。
+
+
+需要禁止用户直接操作增量物化视图表。
+
+为什么不支持外部表、视图，因为触发器不支持TRUNCATE外部表、视图，我们的设计是基于触发器实现的。
+
+在计算增量视图前，必须要锁定所有基表，设置for update锁。
+---
 
 参考文档：
 [CloudberryDB内核分享：增量物化视图的原理与实现讲解](https://segmentfault.com/a/1190000045387918)
