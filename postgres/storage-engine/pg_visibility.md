@@ -1,4 +1,4 @@
-### PostgreSQL数据库插件——pg_visibility
+### PostgreSQL可见性映射VM的设计以及扩展pg_visibility
 
 pg_visibility是一个PostgreSQL数据库插件，提供了一种方式来检查一个表的可见性映射（VM）以及页级别的可见性信息。
 
@@ -131,7 +131,7 @@ vacuum_rel(Oid relid, RangeVar * relation, VacuumParams * params) (src\backend\c
 vacuum(List * relations, VacuumParams * params, BufferAccessStrategy bstrategy, _Bool isTopLevel) (src\backend\commands\vacuum.c:476)
 ExecVacuum(ParseState * pstate, VacuumStmt * vacstmt, _Bool isTopLevel) (src\backend\commands\vacuum.c:269)
 ```
-在实际vacuum中，并不是可见性映射中被标记为all-visible的页面就一定会被跳过，实际上是有个一阈值`SKIP_PAGES_THRESHOLD`，默认为32，只有当连续跳过的页面数大于这个阈值时，才会跳过这些页面，否则会继续扫描这些页面，由于我们是顺序读取的，OS会进行预读，因此偶尔跳过一页并不会带来太大的性能提升，而且如何跳过一页，也意味着我们无法更新relfrozenxid，会对后续vacuum执行的策略造成影响。
+在实际vacuum中，并不是可见性映射中被标记为all-visible的页面就一定会被跳过，实际上是有个一阈值`SKIP_PAGES_THRESHOLD`，默认为32，只有当连续跳过的页面数大于这个阈值时，才会跳过这些页面，否则会继续扫描这些页面，由于我们是顺序读取的，OS会进行预读，因此偶尔跳过一页并不会带来太大的性能提升，而且如果跳过一页，也意味着我们无法更新relfrozenxid，会对后续vacuum执行的策略造成影响。
 
 Except when aggressive is set, we want to skip pages that are all-visible according to the visibility map, but only when we can skip at least SKIP_PAGES_THRESHOLD consecutive pages.  Since we're reading sequentially, the OS should be doing readahead for us, so there's no gain in skipping a page now and then; that's likely to disable readahead and so be counterproductive. Also, skipping even a single page means that we can't update relfrozenxid, so we only want to do it if we can skip a goodly number of pages.
 
@@ -231,3 +231,4 @@ uint8 visibilitymap_get_status(Relation rel, BlockNumber heapBlk, Buffer *buf)
 	return result;
 }
 ```
+

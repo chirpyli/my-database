@@ -1,4 +1,4 @@
-### PostgreSQL源码分析——外存管理
+### PostgreSQL外存管理
 数据库最终都是持久化存储的（除了内存数据库等），持久化就要将数据从内存Buffer落盘到外存。这里分析一下PostgreSQL中外存管理部分的内容。源码在`src/backend/storage/smgr`这一部分。
 
 

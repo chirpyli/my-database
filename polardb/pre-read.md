@@ -124,7 +124,7 @@ postgres=# select * from pg_buffercache where relfilenode=16388;
 2. 每次不一定会预读16个数据页，如果要读取的页不足16个，则预读实际要读取的页数或者至多读到命中Buffer的页为止（不会超过16个），并且一次预读的页数不会跨文件去读，因为超过1G的表会划分为多个段文件进行存储，如果要预读的页要跨文件，那么不进行跨文件读取，近读取到当前段文件最后一个页即止。
 3. 如果只需要读1个页，则无需进行预读。
 4. 如果读的第一个页已在Buffer中，则无需进行预读。
-5. 预读的页数不会超过参数polar_bulk_read_size所指定的值，默认为16个页，但是最大只能设置为64，即不超过512kB。
+5. 预读的页数不会超过参数`polar_bulk_read_size`所指定的值，默认为16个页，但是最大只能设置为64，即不超过512kB。
 6. 第一个页的读取方式与普通读取方式相同，不会触发预读。主要是为了优化普通读取的场景，避免不必要的预读。
 
 我们先看一下关键路径调用栈：
@@ -140,10 +140,10 @@ polar_mdbulkread (reln=0x646569d08860, forknum=MAIN_FORKNUM, blocknum=1, blockCo
     blockCount=16, buffer=0x646569d66000 "") at smgr.c:617
 #2  0x00006465678a2ca8 in polar_bulk_read_buffer_common (reln=0x7e6754f948c8, relpersistence=112 'p', 
     forkNum=MAIN_FORKNUM, firstBlockNum=1, mode=RBM_NORMAL, strategy=0x0, hit=0x7ffef7cbf8a3, 
-    maxBlockCount=16) at /home/postgres/polardb_pg/src/backend/storage/buffer/polar_bufmgr.c:1432
+    maxBlockCount=16) at polar_bufmgr.c:1432
 #3  0x00006465678a2534 in polar_bulk_read_buffer_extended (reln=0x7e6754f948c8, forkNum=MAIN_FORKNUM, 
     blockNum=1, mode=RBM_NORMAL, strategy=0x0, maxBlockCount=26)
-    at /home/postgres/polardb_pg/src/backend/storage/buffer/polar_bufmgr.c:1158 // 这里开始进行预读的逻辑
+    at polar_bufmgr.c:1158 // 这里开始进行预读的逻辑
 #4  0x00006465673599a1 in heapgetpage (sscan=0x646569d62a80, page=1) at heapam.c:426 //这之前的流程和PostgreSQL是一样的
 #5  0x000064656735bf40 in heapgettup_pagemode (scan=0x646569d62a80, dir=ForwardScanDirection, nkeys=0, 
     key=0x0) at heapam.c:1161

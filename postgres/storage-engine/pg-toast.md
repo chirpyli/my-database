@@ -20,7 +20,7 @@ PostgreSQL中数据存储在堆表heap中，堆表一个页为8k，但是如果�
 - EXTERNAL：允许行外存储，但不许压缩。类似字符串这种会对数据的一部分进行操作的字段，采用此策略可能获得更高的性能，因为不需要读取出整行数据再解压。
 - MAIN：允许压缩，但不许行外存储。不过实际上，为了保证过大数据的存储，行外存储在其它方式（例如压缩）都无法满足需求的情况下，作为最后手段还是会被启动。因此理解为：尽量不使用行外存储更贴切。
 
-通常，为了保证存储密度，PG一页（大小为8K字节）至少存储四个元组。因此理论上，一个元组大小阈值最大为：（8K字节 - 页面头部）/ 4。进行TOAST存储时，我们依次应用以下算法原则，并在该行不再超过阈值时立即停止：
+<font color=blue>通常，为了保证存储密度，PG一页（大小为8K字节）至少存储四个元组。</font>因此理论上，一个元组大小阈值最大为：（8K字节 - 页面头部）/ 4。进行TOAST存储时，我们依次应用以下算法原则，并在该行不再超过阈值时立即停止：
 1. 首先，我们从“最长”属性到“最短”属性，通过“EXTERNAL”和“EXTENDED”策略来遍历属性。如果EXTENDED属性被压缩（如果有效的话），并且如果值本身超过页面的四分之一，它将立即进入TOAST表。External属性的处理方式相同，但未压缩。
 2. 如果在第一遍之后行版本仍不适合该页面，则将带有“EXTERNAL”和“EXTENDED”策略的其余属性传输到TOAST表。
 3. 如果这也没有帮助，可以尝试使用MAIN策略压缩属性，但将其保留在表的页中。
@@ -129,7 +129,7 @@ postgres=# select chunk_id,chunk_seq,length(chunk_data),left(encode(chunk_data,'
 ```
 
 #### 什么时候创建toast表
-什么时候创建toast表呢？创建toast表的过程对用户来说是透明无感的，在创建表的时候，如果含有可toast的属性，那么就会在创建表后，创建toast表，并将toast表的oid信息对原表在pg_class.reltoastrelid字段进行更新。
+什么时候创建toast表呢？创建toast表的过程对用户来说是透明无感的，<font color=blue>在创建表的时候，如果含有可toast的属性，那么就会在创建表后，创建toast表，并将toast表的oid信息对原表在pg_class.reltoastrelid字段进行更新。</font>
 ```c++
 	CreateStmt *cstmt = (CreateStmt *) stmt;
 	Datum		toast_options;
@@ -170,7 +170,7 @@ Indexes:
     "pg_toast_20042_index" PRIMARY KEY, btree (chunk_id, chunk_seq)
 Access method: heap
 ```
-我们通过chunk_id来辨识是属于哪个元组的数据，每个被存储在toast的数据都会被分配一个OID，通过这个OID可以在toast表中找到属于该toast数据的所有片段，进而可以重组该数据。前面讲过为了解决超大数据可能会超过页大小的问题，采用分片存储，将原有的超大数据切分为多个片段chunk，通过chunk_seq为分片分配顺序，将分片数据保存在chunk_data中。这里还有一个问题，那就是分片大小？分片的大小为`TOAST_MAX_CHUNK_SIZE`字节，每个分片都作为独立的元组存储在toast表中。
+<font color=blue>我们通过chunk_id来辨识是属于哪个元组的数据，</font>每个被存储在toast的数据都会被分配一个OID，通过这个OID可以在toast表中找到属于该toast数据的所有片段，进而可以重组该数据。前面讲过为了解决超大数据可能会超过页大小的问题，采用分片存储，将原有的超大数据切分为多个片段chunk，通过chunk_seq为分片分配顺序，将分片数据保存在chunk_data中。这里还有一个问题，那就是分片大小？分片的大小为`TOAST_MAX_CHUNK_SIZE`字节，每个分片都作为独立的元组存储在toast表中。
 ```c++
 #define EXTERN_TUPLES_PER_PAGE	4	/* toast表中一个页中切片的数量，这个值是可以被修改的 */
 
@@ -195,7 +195,7 @@ typedef struct varatt_external
 }			varatt_external;
 ```
 
-总结访问toast表的流程：首先从表的toast属性中获取toast指针，然后通过toast指针找到toast表，再通过toast数据的oid在toast表中找到所有的分片并按序号拼装起来得到完整的toast数据。
+总结访问toast表的流程：首先从表的toast属性中获取<font color=red>toast指针</font>，然后通过toast指针找到toast表，再通过toast数据的oid在toast表中找到所有的分片并按序号拼装起来得到完整的toast数据。
 
 #### 元组插入/更新时的TOAST操作
 

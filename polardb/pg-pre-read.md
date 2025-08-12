@@ -89,3 +89,32 @@ Linux文件系统对顺序读的优化：预读，读流程，首先从页缓存
 ---
 参考文档：
 [MogDB顺序扫描预读](https://docs.mogdb.io/zh/mogdb/v5.0/seqscan-prefetch)
+
+
+
+性能测试：
+开启堆表预读后，正向顺序扫描性能有提升，文件系统预读参数对堆表预读性能有较大影响。实际测试时，可通过命令`blockdev --getfra<块设备>`查看文件系统的预读参数值，通过命令`blockdev --setfra<预读块数> <块设备>`修改文件系统预读参数， 如果文件系统预读大学比堆表预读大学大或者相近，则堆表预读性能提升不明显或相近，建议将文件系统预读参数调小，堆表预读参数要倍于文件系统预读大小，进行测试。
+
+可通过`lsblk`查看块设备
+
+查看是否是SSD：
+```sh
+# sudo apt-get install smartmontools
+postgres@slpc:~$ sudo smartctl -i /dev/sda3 
+smartctl 7.4 2023-08-01 r5530 [x86_64-linux-6.8.0-71-generic] (local build)
+Copyright (C) 2002-23, Bruce Allen, Christian Franke, www.smartmontools.org
+
+=== START OF INFORMATION SECTION ===
+Vendor:               VMware,
+Product:              VMware Virtual S
+Revision:             1.0
+User Capacity:        214,748,364,800 bytes [214 GB]
+Logical block size:   512 bytes
+Rotation Rate:        Solid State Device   # SSD
+Device type:          disk
+Local Time is:        Mon Aug 11 10:18:44 2025 CST
+SMART support is:     Unavailable - device lacks SMART capability.
+```
+
+
+`lsblk -d -o name,rota` 1为HDD，0为SSD

@@ -18,8 +18,8 @@
 
 #### PostgreSQL协议
 - [libpq原理分析](./postgres/pg-protocol/libpq.md)
-- [Postgres源码分析——口令认证](./postgres/pg-protocol/pg-src-analyze-auth.md)
-- [Postgres源码分析——psql](./postgres/pg-protocol/pg-src-analyze-psql.md)
+- [Postgres口令认证](./postgres/pg-protocol/pg-src-analyze-auth.md)
+- [Postgres客户端工具psql](./postgres/pg-protocol/pg-src-analyze-psql.md)
 
 #### SQL引擎
 
